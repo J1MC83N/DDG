@@ -245,7 +245,7 @@ function orient_faces(faces::Vector{F},E2FID::FIDDictwo{_Edge}) where F<:Abstrac
 end
 
 modoff1(x::T,y::Integer) where T = T(mod(x-1,y)+1)
-function HMesh{N}(polys::Vector{F}, nv::Int=maximum(maximum,polys)) where {N,F<:AbstractVector{VID}}
+function HMesh{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) where {N,F<:AbstractVector{VID}}
     # polys provides face=>edge assocation
     nf = length(polys)
     @assert N == 0 || all(f->length(f)==N,polys)
@@ -383,6 +383,7 @@ struct VHIterator
     h_start::HID
     VHIterator(mesh::HMesh,v::VID) = new(mesh,halfedge(mesh,v))
 end
+
 Base.IteratorSize(::Type{VHIterator}) = Base.SizeUnknown()
 Base.eltype(::VHIterator) = HID
 
@@ -400,15 +401,41 @@ end
 VVIterator(mesh::HMesh,v::VID) = imap(∂headvertex(mesh),VHIterator(mesh,v))
 VFIterator(mesh::HMesh,v::VID) = imap(∂face(mesh),VHIterator(mesh,v))
 
+
+struct FHIterator{N}
+    mesh::HMesh{N}
+    h_start::HID
+    FHIterator{N}(mesh::HMesh{N},f::FID) where N = new{N}(mesh,halfedge(mesh,f))
+    FHIterator(mesh::HMesh{N},f::FID) where N = new{N}(mesh,halfedge(mesh,f))
+end
+
+Base.IteratorSize(::Type{FHIterator{0}}) = Base.SizeUnknown()
+Base.IteratorSize(::Type{FHIterator{N}}) where N = Base.HasLength()
+Base.length(::FHIterator{N}) where N = N
+Base.eltype(::FHIterator) = HID
+
+function Base.iterate(iter::FHIterator)
+    @unpack mesh,h_start = iter
+    return (h_start, next(mesh,h_start))
+end
+function Base.iterate(iter::FHIterator, h::HID)
+    @unpack mesh,h_start = iter
+    h_start == h && return nothing
+    return (h, next(mesh,h))
+end
+
+FVIterator(mesh::HMesh, f::FID) = imap(∂headvertex(mesh),FHIterator(mesh,f))
+FFIterator(mesh::HMesh, f::FID) = imap(h->face(mesh,twin(mesh,h)),FHIterator(mesh,f))
+
+
+isboundary(mesh::HMesh, h::HID) = isnothing(face(mesh,h))
+isboundary(mesh::HMesh, f::FID) = any(isnothing,FFIterator(mesh,f))
+isboundary(mesh::HMesh, v::VID) = any(isnothing,VFIterator(mesh,v))
+
+
 #= #TODO:
-Iterator:
-
-f-v
-f-h
-f-f
-
-isboundary: v, h, f
 
 =#
 
-_mesh = HMesh{3}("gourd.obj")
+_mesh = HMesh{3}([[1,2,3],[2,3,4]])
+_gourd = HMesh{3}("test-obj/gourd.obj")
