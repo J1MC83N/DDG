@@ -401,7 +401,7 @@ end
 VVIterator(mesh::HMesh,v::VID) = imap(∂headvertex(mesh),VHIterator(mesh,v))
 VFIterator(mesh::HMesh,v::VID) = imap(∂face(mesh),VHIterator(mesh,v))
 
-
+"""Iterates over all halfedges of a face"""
 struct FHIterator{N}
     mesh::HMesh{N}
     h_start::HID
@@ -431,6 +431,7 @@ FFIterator(mesh::HMesh, f::FID) = imap(h->face(mesh,twin(mesh,h)),FHIterator(mes
 isboundary(mesh::HMesh, h::HID) = isnothing(face(mesh,h))
 isboundary(mesh::HMesh, f::FID) = any(isnothing,FFIterator(mesh,f))
 isboundary(mesh::HMesh, v::VID) = any(isnothing,VFIterator(mesh,v))
+
 
 
 #= #TODO:
