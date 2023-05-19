@@ -10,7 +10,7 @@ Naming conventions:
 =#
 
 using Pkg; Pkg.activate(".")
-using StaticArrays, UnPack, Multisets, Bijections, DataStructures, IterTools
+using Meshes, StaticArrays, UnPack, Multisets, Bijections, DataStructures, IterTools
 
 # function _gi(ex::Expr)
 #     ex.head === :call || return ex
@@ -18,7 +18,7 @@ using StaticArrays, UnPack, Multisets, Bijections, DataStructures, IterTools
 #         Expr(:ref, _gi(ex.args[3]), _gi(ex.args[2]))
 #     else
 #         Expr(:call, _gi.(ex.args)...)
-#     end
+#     endj
 # end
 # _gi(ex) = ex
 # macro gi(ex)
@@ -33,69 +33,78 @@ include("Handles.jl")
 const INVALID_ID = 0
 
 """
-    HMesh{N}
+    ImplicitHalfEdgeTopology{N} <: Topology
     
-HalfEdge Mesh. Connectivity is stored mainly in h2next which encodes the *next* operation; twin halfedges are stored next to each other. A positive N means that all polygon faces of the mesh are degree N, otherwise N = 0 represents mixed polygon degrees. 
+Implicit HalfEdge Mesh Topology. Connectivity information is stored mainly in h2next which encodes the *next* operation; twin halfedges are stored next to each other. A positive N means that all polygon faces of the topology are degree N, otherwise N = 0 represents mixed polygon degrees. 
 
-Philosophy adopted from here: https://geometry-central.net/surface/surface_mesh/internals/
+Philosophy adopted from here: https://geometry-central.net/surface/surface_topo/internals/
 """
-struct HMesh{N}
+struct ImplicitHalfEdgeTopology{N} <: Topology
     h2next  :: Vector{HID}
     h2v     :: Vector{VID}
     h2f     :: Vector{Union{FID,Nothing}}
     v2h     :: Vector{HID}
     f2h     :: Vector{HID}
 end
+const IHTopology = ImplicitHalfEdgeTopology
+
 const ø = nothing
 
-nhalfedges(mesh::HMesh) = length(mesh.h2next)
-nvertices(mesh::HMesh) = length(mesh.v2h)
-nfaces(mesh::HMesh) = length(mesh.f2h)
-nhvf(mesh::HMesh) = (nhalfedges(mesh),nvertices(mesh),nfaces(mesh))
+import Meshes: paramdim, nvertices, nfaces, nfacets, nelements
+paramdim(::IHTopology) = 2
+nvertices(topo::IHTopology) = length(topo.v2h)
+nhalfedges(topo::IHTopology) = length(topo.h2next)
+nfacets(topo::IHTopology) = nhalfedges(topo)÷2
+nfaces(topo::IHTopology) = nfaces(topo,2)
+nelements(topo::IHTopology) = length(topo.f2h)
+nhvf(topo::IHTopology) = (nhalfedges(topo),nvertices(topo),nfaces(topo))
 
-# convenience methods for getting around an HMesh, also improve code readability
-next(mesh::HMesh,hid::HID) = mesh.h2next[hid]
+# convenience methods for getting around an IHTopology, also improve code readability
+next(topo::IHTopology,hid::HID) = topo.h2next[hid]
 hidtwin(id::HID) = HID(((id-1)⊻1)+1)
-twin(::HMesh,hid::HID) = hidtwin(hid)
-prev(mesh::HMesh,hid::HID) = findfirst(==(hid),mesh.h2next)
-vertex(mesh::HMesh,hid::HID) = mesh.h2v[hid]
-headvertex(mesh::HMesh,hid::HID) = vertex(mesh,next(mesh,hid))
-face(mesh::HMesh,hid::HID) = mesh.h2f[hid]
-halfedge(mesh::HMesh,vid::VID) = mesh.v2h[vid]
-halfedge(mesh::HMesh,fid::FID) = mesh.f2h[fid]
+twin(::IHTopology,hid::HID) = hidtwin(hid)
+prev(topo::IHTopology,hid::HID) = findfirst(==(hid),topo.h2next)
+vertex(topo::IHTopology,hid::HID) = topo.h2v[hid]
+headvertex(topo::IHTopology,hid::HID) = vertex(topo,next(topo,hid))
+face(topo::IHTopology,hid::HID) = topo.h2f[hid]
+halfedge(topo::IHTopology,vid::VID) = topo.v2h[vid]
+halfedge(topo::IHTopology,fid::FID) = topo.f2h[fid]
 
 # define partial applications
 const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face])
 _symcat(s1,s2) = Symbol(string(s1,s2))
 for f in _PARTIAL_METHODS
-    @eval $(_symcat(:∂,f))(mesh::HMesh) = obj -> $f(mesh, obj)
+    @eval $(_symcat(:∂,f))(topo::IHTopology) = obj -> $f(topo, obj)
 end
 
 const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge])
 """
     @fix1 fixed_arg expr
 
-Convenience macro for fixing the first argument `fixed_arg` for all whitelisted function calls in `expr`. Used only for the convenience methods for getting around an HMesh; whitelist represented by the global constant `_FIX1_METHODS`, which currently consists of `next`, `twin`, `prev`, `vertex`, `headvertex`, `face`, and `halfedge`.
+Convenience macro for fixing the first argument `fixed_arg` for all whitelisted function calls in `expr`. Used only for the convenience methods for getting around an IHTopology; whitelist represented by the global constant `_FIX1_METHODS`, which currently consists of `next`, `twin`, `prev`, `vertex`, `headvertex`, `face`, and `halfedge`.
 
-For instance, `@fix1 mesh next(h)` is equivalent to `next(mesh, h)`. 
-Also supports chaining: `@fix1 mesh h |> next |> face` is equivalent to `face(mesh, next(mesh, h))`.
+For instance, `@fix1 topo next(h)` is equivalent to `next(topo, h)`. 
+Also supports chaining: `@fix1 topo h |> next |> face` is equivalent to `face(topo, next(topo, h))`.
 """
 macro fix1(fixed,ex)
     _fix1(fixed,ex)
 end
 function _fix1(fixed::Symbol,ex::Expr)
-    ex.head === :call || return ex
-    # @show (1,fixed,ex)
-    fun = ex.args[1]
-    out = if fun in _FIX1_METHODS
-        Expr(:call, fun, esc(fixed), [_fix1(fixed,arg) for arg in ex.args[2:end]]...)
-    elseif fun === :|>
-        fun_actual = ex.args[3]
-        Expr(:call, esc(fun_actual), esc(fixed), _fix1(fixed,ex.args[2]))
+    if ex.head === :call
+        fun = ex.args[1]
+        if fun in _FIX1_METHODS
+            Expr(:call, fun, esc(fixed), [_fix1(fixed,arg) for arg in ex.args[2:end]]...)
+        elseif fun === :|>
+            fun_actual = ex.args[3]
+            Expr(:call, esc(fun_actual), esc(fixed), _fix1(fixed,ex.args[2]))
+        else
+            Expr(:call, [_fix1(fixed,arg) for arg in ex.args]...)
+        end
+    elseif ex.head in [:ref, :tuple, :vect]
+        Expr(ex.head, [_fix1(fixed,arg) for arg in ex.args]...)
     else
-        Expr(:call, [_fix1(fixed,arg) for arg in ex.args]...)
+        ex
     end
-    return out
 end
 # _fix1(fixed,ex::Symbol) = (@show 2,fixed,ex; esc(ex))
 # _fix1(fixed,ex) = (@show 3,fixed,ex; ecs(ex))
@@ -103,9 +112,9 @@ _fix1(fixed::Symbol,ex) = esc(ex)
 
 cut_vector_typeinfo(str::AbstractString) = replace(str,r"^[\w\{\}, ]+\["=>"[")
     
-function Base.show(io::IO,::MIME"text/plain", mesh::HMesh{N}) where N
-    @unpack h2next,h2v,h2f,v2h,f2h = mesh
-    println(io,"Halfedge Mesh with $(nvertices(mesh)) vertices, $(nhalfedges(mesh)) halfedges, and $(nfaces(mesh)) faces:")
+function Base.show(io::IO,::MIME"text/plain", topo::IHTopology{N}) where N
+    @unpack h2next,h2v,h2f,v2h,f2h = topo
+    println(io,"Implicit Halfedge Topology with $(nfaces(topo)) faces (degree $(iszero(N) ? "arbitrary" : N)), $(nvertices(topo)) vertices, and $(nhalfedges(topo)) halfedges:")
     context = IOContext(stdout,:limit=>true,:compact=>true)
     println(io, "  h2next : HID", repr(h2next;context) |> cut_vector_typeinfo)
     println(io, "  h2v    : VID", repr(h2v;context) |> cut_vector_typeinfo)
@@ -114,34 +123,100 @@ function Base.show(io::IO,::MIME"text/plain", mesh::HMesh{N}) where N
     println(io, "  f2h    : HID", repr(f2h;context) |> cut_vector_typeinfo)
 end
 
+####################################### Iterators #######################################
+
+"""Iterates over all outgoing halfedges of a vertex"""
+struct VHIterator
+    topo::IHTopology
+    h_start::HID
+    VHIterator(topo::IHTopology,v::VID) = new(topo,halfedge(topo,v))
+end
+
+Base.IteratorSize(::Type{VHIterator}) = Base.SizeUnknown()
+Base.eltype(::VHIterator) = HID
+
+function Base.iterate(iter::VHIterator)
+    @unpack topo,h_start = iter
+    return (h_start, @fix1 topo next(twin(h_start)))
+end
+function Base.iterate(iter::VHIterator, h::HID)
+    @unpack topo,h_start = iter
+    h_start == h && return nothing
+    return (h, @fix1 topo next(twin(h)))
+end
+
+# const VVIterator = Base.Generator{Base.Iterators.Zip{Tuple{VHIterator}}, IterTools.var"#1#2"{<:Function}}
+VVIterator(topo::IHTopology,v::VID) = imap(∂headvertex(topo),VHIterator(topo,v))
+VFIterator(topo::IHTopology,v::VID) = imap(∂face(topo),VHIterator(topo,v))
+
+"""Iterates over all halfedges of a face"""
+struct FHIterator{N}
+    topo::IHTopology{N}
+    h_start::HID
+    FHIterator{N}(topo::IHTopology{N},f::FID) where N = new{N}(topo,halfedge(topo,f))
+    FHIterator(topo::IHTopology{N},f::FID) where N = new{N}(topo,halfedge(topo,f))
+end
+
+Base.IteratorSize(::Type{FHIterator{0}}) = Base.SizeUnknown()
+Base.IteratorSize(::Type{FHIterator{N}}) where N = Base.HasLength()
+Base.length(::FHIterator{N}) where N = N
+Base.eltype(::FHIterator) = HID
+
+function Base.iterate(iter::FHIterator)
+    @unpack topo,h_start = iter
+    return (h_start, next(topo,h_start))
+end
+function Base.iterate(iter::FHIterator, h::HID)
+    @unpack topo,h_start = iter
+    h_start == h && return nothing
+    return (h, next(topo,h))
+end
+
+FVIterator(topo::IHTopology, f::FID) = imap(∂headvertex(topo),FHIterator(topo,f))
+FFIterator(topo::IHTopology, f::FID) = imap(h->face(topo,twin(topo,h)),FHIterator(topo,f))
+
+isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
+isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
+isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
+
+import Meshes: element, facet
+element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))))
+element(topo::IHTopology{N}, f::Integer) where N = Connectivity{Ngon{N},N}(Tuple(FVIterator(topo,FID(f))))
+function facet(topo::IHTopology, e::Integer)
+    h = HID(2*e-1)
+    connect(@fix1 topo (vertex(h), headvertex(h)))
+end
+
+############################# validation #############################
+
 """ Find the orbit of an halfedge w.r.t. to the *next* operator """
-function orbit(mesh::HMesh{0},hid::HID)
+function orbit(topo::IHTopology{0},hid::HID)
     orb = HID[hid]
     count = 0
-    COUNT_THRESHOLD = nhalfedges(mesh)
+    COUNT_THRESHOLD = nhalfedges(topo)
     while count < COUNT_THRESHOLD
-        nextid = next(mesh,orb[end])
+        nextid = next(topo,orb[end])
         nextid == hid && return orb
         push!(orb, nextid)
     end
     error("No orbit found")
 end
-function orbit(mesh::HMesh{N},hid::HID) where N
+function orbit(topo::IHTopology{N},hid::HID) where N
     orb = Vector{HID}(undef,N)
     orb[1] = hid
     thisid = hid
     for i in 2:N
-        thisid = next(mesh,thisid)
+        thisid = next(topo,thisid)
         thisid != hid || error("Unexpectedly short orbit of length $i, supposed to be $N")
         orb[i] = thisid
     end
-    next(mesh,thisid) == hid || error("Unexpectedly long orbit: $orb")
+    next(topo,thisid) == hid || error("Unexpectedly long orbit: $orb")
     return orb
 end
 
 @inline ex_in(ex::NTuple{2,<:Real},bounds::NTuple{2,<:Real}) = ex[1] >= bounds[1] && ex[2] <= bounds[2]
-function validate_mesh_handles(mesh::HMesh)
-    @unpack h2next, h2v, h2f, v2h, f2h = mesh
+function validate_topo_handles(topo::IHTopology)
+    @unpack h2next, h2v, h2f, v2h, f2h = topo
     @assert length(h2next) == length(h2v) == length(h2f)
     nh,nv,nf = (h2next,v2h,f2h) .|> length
     @assert ex_in(extrema(h2next),(1,nh))
@@ -152,44 +227,44 @@ function validate_mesh_handles(mesh::HMesh)
     nothing
 end
 
-function validate_mesh_faceorbits(mesh::HMesh)
-    @unpack h2f, f2h = mesh
-    nh,nv,nf = nhvf(mesh)
+function validate_topo_faceorbits(topo::IHTopology)
+    @unpack h2f, f2h = topo
+    nh,nv,nf = nhvf(topo)
     hinternal = zeros(Bool,nh)
     # ensure that for each face f, the orbit of an halfedge of f (given by h2next) is equal to the set of edges in f (given by h2f)
     for fid in FID(1):nf
-        horbit = orbit(mesh,f2h[fid])
+        horbit = orbit(topo,f2h[fid])
         Multiset(horbit) == Multiset(findall(==(fid),h2f)) || error("Orbit-face mismatch for face $fid: \n$horbit\n$(findall(==(fid),h2f))")
         hinternal[horbit] .= true
     end
     # boundary halfedge conditions
     for hid in HID(1):nh
         hinternal[hid] && continue
-        nextid = next(mesh,hid)
+        nextid = next(topo,hid)
         !hinternal[nextid] || error("Next ($nextid) of boundary halfedge $hid is not also a boundary")
     end
     nothing
 end
 
-validate_mesh_facedegree(::HMesh{0}) = nothing
-function validate_mesh_facedegree(mesh::HMesh{N}) where N
-    @unpack f2h = mesh
-    for fid in FID(1):nfaces(mesh)
-        l = length(orbit(mesh,f2h[fid]))
+validate_topo_facedegree(::IHTopology{0}) = nothing
+function validate_topo_facedegree(topo::IHTopology{N}) where N
+    @unpack f2h = topo
+    for fid in FID(1):nfaces(topo)
+        l = length(orbit(topo,f2h[fid]))
         l == N || error("Orbit of face $fid has length $l, expected $N")
     end
     nothing
 end
 
-""" Performs various sanity checks on the self-coherency of the mesh """
-function validate_mesh(mesh::HMesh)
-    validate_mesh_handles(mesh)
-    validate_mesh_faceorbits(mesh)
-    validate_mesh_facedegree(mesh)
+""" Performs various sanity checks on the self-coherency of the topology """
+function validate_topo(topo::IHTopology)
+    validate_topo_handles(topo)
+    validate_topo_faceorbits(topo)
+    validate_topo_facedegree(topo)
     nothing
 end
 
-################ Methods for constructing HMesh from polygon soup ##################
+################ Methods for constructing IHTopology from polygon soup ##################
 
 include("polygon_soup_utils.jl")
 
@@ -245,7 +320,7 @@ function orient_faces(faces::Vector{F},E2FID::FIDDictwo{_Edge}) where F<:Abstrac
 end
 
 modoff1(x::T,y::Integer) where T = T(mod(x-1,y)+1)
-function HMesh{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) where {N,F<:AbstractVector{VID}}
+function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) where {N,F<:AbstractVector{VID}}
     # polys provides face=>edge assocation
     nf = length(polys)
     @assert N == 0 || all(f->length(f)==N,polys)
@@ -333,19 +408,37 @@ function HMesh{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) where {
         isused || (v2h[i] = INVALID_ID)
     end
     
-    return HMesh{N}(h2next,h2v,h2f,v2h,f2h)
+    return IHTopology{N}(h2next,h2v,h2f,v2h,f2h)
 end
-function HMesh{N}(polys::Vector{F}) where {N,F<:AbstractVector{<:Integer}}
+function IHTopology{N}(polys::Vector{F}) where {N,F<:AbstractVector{<:Integer}}
     polys_ = [convert.(VID,face) for face in polys]
-    HMesh{N}(polys_)
+    IHTopology{N}(polys_)
 end
+
+
+_connectivity_size(::Connectivity{<:Any,N}) where N = N
+IHTopology{0}(elems::AbstractVector{<:Connectivity}) = IHTopology{0}([collect(VID,indices(c)) for c in elems])
+IHTopology{N}(elems::AbstractVector{<:Connectivity{<:Any,N}}) where N = IHTopology{N}([SVector{N,VID}(indices(c)) for c in elems])
+IHTopology(elems::AbstractVector{<:Connectivity{<:Any,N}}) where N = IHTopology{N}(elems)
+_allequal(v::AbstractVector) = isempty(v) ? true : all(==(first(v)),v)
+function IHTopology(elems::AbstractVector{<:Connectivity})
+    if _allequal(_connectivity_size.(elems))
+        N = _connectivity_size(first(elems))
+        IHTopology{N}(([SVector{N,VID}(indices(c)) for c in elems]))
+    else
+        IHTopology{0}(elems)
+    end
+end
+
+Base.convert(::Type{IHTopology}, topo::Topology) = IHTopology(collect(elements(topo)))
+Base.convert(::Type{IHTopology{N}}, topo::Topology) where N = IHTopology{N}(collect(elements(topo)))
 
 function matchf(f,r::Regex,s::AbstractString)
     m = match(r,s)
     isnothing(m) ? nothing : f(m)
 end
 nvertices_obj(objfile::AbstractString) = sum(startswith("v "),eachline(objfile))
-function HMesh{N}(objfile::AbstractString) where N
+function IHTopology{N}(objfile::AbstractString) where N
     soup = Vector{VID}[]
     for line in eachline(objfile)
         poly = matchf(r"f ([ \d]*)", line) do m::RegexMatch
@@ -353,9 +446,8 @@ function HMesh{N}(objfile::AbstractString) where N
         end
         !isnothing(poly) && push!(soup,poly)
     end
-    return HMesh{N}(soup,nvertices_obj(objfile))
+    return IHTopology{N}(soup,nvertices_obj(objfile))
 end
-
 
 ################################ Convenient HalfEdge type ###############################
 
@@ -367,70 +459,15 @@ struct HalfEdge
     HalfEdge(vertex::Integer, next::Integer, twin::Integer, face::Union{Integer,Nothing}=nothing) = new(vertex, next, twin, face)
 end
 
-function HalfEdge(mesh::HMesh, hid::HID)
-    @unpack h2next,h2v,h2f = mesh
+function HalfEdge(topo::IHTopology, hid::HID)
+    @unpack h2next,h2v,h2f = topo
     HalfEdge(h2v[hid],h2next[hid],idtwin(hid),h2f[hid])
 end
 
-next(mesh::HMesh,h::HalfEdge) = HalfEdge(mesh,h.next)
-twin(mesh::HMesh,h::HalfEdge) = HalfEdge(mesh,h.twin)
-
-####################################### Iterators #######################################
-
-"""Iterates over all outgoing halfedges of a vertex"""
-struct VHIterator
-    mesh::HMesh
-    h_start::HID
-    VHIterator(mesh::HMesh,v::VID) = new(mesh,halfedge(mesh,v))
-end
-
-Base.IteratorSize(::Type{VHIterator}) = Base.SizeUnknown()
-Base.eltype(::VHIterator) = HID
-
-function Base.iterate(iter::VHIterator)
-    @unpack mesh,h_start = iter
-    return (h_start, @fix1 mesh next(twin(h_start)))
-end
-function Base.iterate(iter::VHIterator, h::HID)
-    @unpack mesh,h_start = iter
-    h_start == h && return nothing
-    return (h, @fix1 mesh next(twin(h)))
-end
-
-# const VVIterator = Base.Generator{Base.Iterators.Zip{Tuple{VHIterator}}, IterTools.var"#1#2"{<:Function}}
-VVIterator(mesh::HMesh,v::VID) = imap(∂headvertex(mesh),VHIterator(mesh,v))
-VFIterator(mesh::HMesh,v::VID) = imap(∂face(mesh),VHIterator(mesh,v))
-
-"""Iterates over all halfedges of a face"""
-struct FHIterator{N}
-    mesh::HMesh{N}
-    h_start::HID
-    FHIterator{N}(mesh::HMesh{N},f::FID) where N = new{N}(mesh,halfedge(mesh,f))
-    FHIterator(mesh::HMesh{N},f::FID) where N = new{N}(mesh,halfedge(mesh,f))
-end
-
-Base.IteratorSize(::Type{FHIterator{0}}) = Base.SizeUnknown()
-Base.IteratorSize(::Type{FHIterator{N}}) where N = Base.HasLength()
-Base.length(::FHIterator{N}) where N = N
-Base.eltype(::FHIterator) = HID
-
-function Base.iterate(iter::FHIterator)
-    @unpack mesh,h_start = iter
-    return (h_start, next(mesh,h_start))
-end
-function Base.iterate(iter::FHIterator, h::HID)
-    @unpack mesh,h_start = iter
-    h_start == h && return nothing
-    return (h, next(mesh,h))
-end
-
-FVIterator(mesh::HMesh, f::FID) = imap(∂headvertex(mesh),FHIterator(mesh,f))
-FFIterator(mesh::HMesh, f::FID) = imap(h->face(mesh,twin(mesh,h)),FHIterator(mesh,f))
+next(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.next)
+twin(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.twin)
 
 
-isboundary(mesh::HMesh, h::HID) = isnothing(face(mesh,h))
-isboundary(mesh::HMesh, f::FID) = any(isnothing,FFIterator(mesh,f))
-isboundary(mesh::HMesh, v::VID) = any(isnothing,VFIterator(mesh,v))
 
 
 
@@ -438,5 +475,5 @@ isboundary(mesh::HMesh, v::VID) = any(isnothing,VFIterator(mesh,v))
 
 =#
 
-_mesh = HMesh{3}([[1,2,3],[2,3,4]])
-_gourd = HMesh{3}("test-obj/gourd.obj")
+_topo = IHTopology{3}([[1,2,3],[2,3,4]])
+_gourd = IHTopology{3}("test-obj/gourd.obj")
