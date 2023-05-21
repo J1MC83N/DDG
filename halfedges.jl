@@ -30,6 +30,7 @@ include("Handles.jl")
 @HandleType_alias VertexHandle VID
 @HandleType_alias FaceHandle FID
 @HandleType_alias EdgeHandle EID
+@HandleType_alias CornerHandle CID
 const INVALID_ID = 0
 
 """
@@ -69,15 +70,21 @@ headvertex(topo::IHTopology,hid::HID) = vertex(topo,next(topo,hid))
 face(topo::IHTopology,hid::HID) = topo.h2f[hid]
 halfedge(topo::IHTopology,vid::VID) = topo.v2h[vid]
 halfedge(topo::IHTopology,fid::FID) = topo.f2h[fid]
+# the id of a corner is that of the the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
+@inline halfedge(::IHTopology,cid::CID) = HID(cid)
+next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
+vertex(topo::IHTopology,cid::CID) = headvertex(topo,HID(cid))
+face(topo::IHTopology,cid::CID) = face(topo,HID(cid))
+
 
 # define partial applications
 const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face])
-_symcat(s1,s2) = Symbol(string(s1,s2))
 for f in _PARTIAL_METHODS
-    @eval $(_symcat(:∂,f))(topo::IHTopology) = obj -> $f(topo, obj)
+    @eval $(Symbol(:∂,f))(topo::IHTopology) = obj -> $f(topo, obj)
 end
 
 const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge])
+addtofix1!(fs::Function...) = push!(_FIX1_METHODS,Symbol.(fs)...)
 """
     @fix1 fixed_arg expr
 
@@ -148,6 +155,8 @@ end
 # const VVIterator = Base.Generator{Base.Iterators.Zip{Tuple{VHIterator}}, IterTools.var"#1#2"{<:Function}}
 VVIterator(topo::IHTopology,v::VID) = imap(∂headvertex(topo),VHIterator(topo,v))
 VFIterator(topo::IHTopology,v::VID) = imap(∂face(topo),VHIterator(topo,v))
+VCIterator(topo::IHTopology,v::VID) = imap(CID,VHIterator(topo,v))
+
 
 """Iterates over all halfedges of a face"""
 struct FHIterator{N}
@@ -172,8 +181,9 @@ function Base.iterate(iter::FHIterator, h::HID)
     return (h, next(topo,h))
 end
 
-FVIterator(topo::IHTopology, f::FID) = imap(∂headvertex(topo),FHIterator(topo,f))
-FFIterator(topo::IHTopology, f::FID) = imap(h->face(topo,twin(topo,h)),FHIterator(topo,f))
+FVIterator(topo::IHTopology{N}, f::FID) where N = imap(∂headvertex(topo),FHIterator{N}(topo,f))
+FFIterator(topo::IHTopology{N}, f::FID) where N = imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f))
+FCIterator(topo::IHTopology{N}, f::FID) where N = imap(CID,FHIterator{N}(topo,f))
 
 isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
 isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
@@ -430,7 +440,9 @@ function IHTopology(elems::AbstractVector{<:Connectivity})
     end
 end
 
+Base.convert(::Type{IHTopology}, topo::IHTopology) = topo
 Base.convert(::Type{IHTopology}, topo::Topology) = IHTopology(collect(elements(topo)))
+Base.convert(::Type{IHTopology{N}}, topo::IHTopology{N}) where N = topo
 Base.convert(::Type{IHTopology{N}}, topo::Topology) where N = IHTopology{N}(collect(elements(topo)))
 
 function matchf(f,r::Regex,s::AbstractString)
@@ -474,6 +486,3 @@ twin(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.twin)
 #= #TODO:
 
 =#
-
-_topo = IHTopology{3}([[1,2,3],[2,3,4]])
-_gourd = IHTopology{3}("test-obj/gourd.obj")

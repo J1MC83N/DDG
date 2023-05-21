@@ -55,7 +55,7 @@ else
     # define type alias for HandleSetwo of specific handle types
     # i.e. HIDSetwo => HandleSetwo{HalfEdgeHandle}
     for (tname,alias) in _Handle2Alias
-        @eval const $(_symcat(alias,"Setwo")) = HandleSetwo{$tname}
+        @eval const $(Symbol(alias,"Setwo")) = HandleSetwo{$tname}
     end
 
     @inline first(s::HandleSetwo{T}) where T<:Handle = (s.data>>64) % T
@@ -148,7 +148,7 @@ if !isdefined(Main,:Handle)
 else
     const HandleDictwo{K,H} = Dictwo{K,H,HandleSetwo{H}} where H<:Handle
     for (tname,alias) in _Handle2Alias
-        @eval const $(_symcat(alias,"Dictwo")){K} = HandleDictwo{K,$tname} where K
+        @eval const $(Symbol(alias,"Dictwo")){K} = HandleDictwo{K,$tname} where K
     end
 end
     
