@@ -151,7 +151,49 @@ else
         @eval const $(Symbol(alias,"Dictwo")){K} = HandleDictwo{K,$tname} where K
     end
 end
-    
+
+
+using DataStructures: IntSet, findnextidx
+struct DenseIntDict{V} <: AbstractDict{Int,V}
+    keys::IntSet
+    values::Vector{V}
+    function DenseIntDict{V}(;sizehint::Int=64) where V
+        keys = sizehint!(IntSet(),sizehint)
+        values = Vector{V}(undef,sizehint)
+        new{V}(keys,values)
+    end
+end
+
+import Base: getindex, haskey, keys, get, setindex!, length, iterate, isempty
+keys(d::DenseIntDict) = d.keys
+haskey(d::DenseIntDict, key::Integer) = key in keys(d)
+length(d::DenseIntDict) = length(keys(d))
+getindex(d::DenseIntDict{V}, key::Integer) where V = @inbounds !haskey(d,key) ? throw(KeyError(key)) : d.values[key+1]::V
+function setindex!(d::DenseIntDict{V}, v::V, key::Integer) where V
+    keys,values = d.keys,d.values
+    if key > length(values)-1
+        newlen = 1 + key + key>>1
+        resize!(values, newlen)
+    end
+    push!(keys, key)
+    @inbounds values[key+1] = v
+    return d
+end
+setindex!(d::DenseIntDict{V}, v0, key::Integer) where V = setindex!(d,convert(V,v0),key)
+get(d::DenseIntDict{V}, key::Integer, default) where V = haskey(d,key) ? d[key]::V : default
+isempty(d::DenseIntDict) = isempty(keys(d))
+function iterate(d::DenseIntDict)
+    isempty(d) && return nothing
+    i,state_keys = iterate(keys(d))
+    return (i => d[i], state_keys)
+end
+function iterate(d::DenseIntDict, state_keys)
+    next = iterate(keys(d),state_keys)
+    isnothing(next) && return nothing
+    i,state_keys = next
+    return (i => d[i], state_keys)
+end
+findnextelem(s::IntSet, i::Int, invert::Bool=false) = findnextidx(s,i+1,invert)-1
 
 # """
 #     CyclicPairs{T}

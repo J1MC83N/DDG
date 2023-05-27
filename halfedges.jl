@@ -75,7 +75,11 @@ halfedge(topo::IHTopology,fid::FID) = topo.f2h[fid]
 next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
 vertex(topo::IHTopology,cid::CID) = headvertex(topo,HID(cid))
 face(topo::IHTopology,cid::CID) = face(topo,HID(cid))
-
+# opposite halfedge/corner in a triangle
+unsafe_opp_corner(topo::IHTopology{3},h::HID) = CID(next(topo,h))
+opp_corner(topo::IHTopology{3},h::HID) = (@assert !isnothing(face(topo,h)); unsafe_opp_corner(topo,h))
+unsafe_opp_halfedge(topo::IHTopology{3},c::CID) = next(topo,next(topo,HID(c)))
+opp_halfedge(topo::IHTopology{3},c::CID) = (@assert !isnothing(face(topo,c)); unsafe_opp_corner(topo,c))
 
 # define partial applications
 const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face])
@@ -155,8 +159,9 @@ end
 # const VVIterator = Base.Generator{Base.Iterators.Zip{Tuple{VHIterator}}, IterTools.var"#1#2"{<:Function}}
 VVIterator(topo::IHTopology,v::VID) = imap(∂headvertex(topo),VHIterator(topo,v))
 VFIterator(topo::IHTopology,v::VID) = imap(∂face(topo),VHIterator(topo,v))
-VCIterator(topo::IHTopology,v::VID) = imap(CID,VHIterator(topo,v))
-
+VIFIterator(topo::IHTopology,v::VID) = Iterators.filter(!isnothing,imap(∂face(topo),VHIterator(topo,v)))
+VCIterator(topo::IHTopology,v::VID) = imap(h->CID(twin(topo,h)),VHIterator(topo,v))
+VICIterator(topo::IHTopology{N}, v::VID) where N = (CID(twin(topo,h)) for h in VHIterator(topo,v) if !isnothing(face(topo,h)))
 
 """Iterates over all halfedges of a face"""
 struct FHIterator{N}
@@ -183,11 +188,13 @@ end
 
 FVIterator(topo::IHTopology{N}, f::FID) where N = imap(∂headvertex(topo),FHIterator{N}(topo,f))
 FFIterator(topo::IHTopology{N}, f::FID) where N = imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f))
+FIFIterator(topo::IHTopology{N}, f::FID) where N = Iterators.filter(!isnothing, imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f)))
 FCIterator(topo::IHTopology{N}, f::FID) where N = imap(CID,FHIterator{N}(topo,f))
 
 isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
 isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
 isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
+addtofix1!(isboundary)
 
 import Meshes: element, facet
 element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))))
@@ -295,37 +302,68 @@ function adjacent_oedgefids(fid::FID,faces::Vector{F},E2FID::FIDDictwo{_Edge}) w
     return oefids
 end
 
-# find consistent orientation for all faces via BFS, assumes surface orientability
-function orient_faces(faces::Vector{F},E2FID::FIDDictwo{_Edge}) where F<:AbstractVector{VID}
-    # glossary: C - a boolean denoting if a face, by its vec-of-vids definition, has consistent orientation with the overall surface orientation
-    @assert !isempty(faces)
-    queue = Queue{Tuple{_OEdge,FID}}()
-    FID2C = Dict(FID(1)=>true)
-    # starting at the first face in faces, enqueue oedge-fid pairs for all adjacent faces
-    for oefid in adjacent_oedgefids(FID(1),faces,E2FID)
-        enqueue!(queue,oefid)
-    end
-    fids_covered = Set{FID}(1)
+f(i,imax,n) = abs(i*n/imax-round(i*n/imax))
+g(i,imax,n) = f(i-1,imax,n) >= f(i,imax,n) < f(i+1,imax,n)
+
+function _orient_faces!(
+    faces::Vector{F}, 
+    E2FID::FIDDictwo{_Edge}, 
+    FID2C::Dict{FID,Bool}, 
+    queue::Queue{Tuple{_OEdge,FID}};
+    check_orientability::Bool) where F<:AbstractVector{VID}
     
+    showprogress = length(faces) > 10000
     while !isempty(queue)
         oedge,fid = dequeue!(queue)
         face = faces[fid]
         _,is_right_order = search_cycpair(face,oedge)
         c = !is_right_order # an consistent orientation means that oedge of this adjacent face is in reverse direction
+        if haskey(FID2C,fid)
+            check_orientability && c != FID2C[fid] && error("inconsistent orientation for face($fid): $(faces[fid])")
+            continue
+        end
         FID2C[fid] = c
-        push!(fids_covered,fid)
+        # print(length(FID2C)," ")
+        showprogress && g(length(FID2C),length(faces),100) && print("#")
         
         # add adjacent faces to search queue
         for (oedge_,fid_) in adjacent_oedgefids(fid,faces,E2FID)
-            if !in(fid_,fids_covered)
-                # reverse edge direction if original face has inconsistent orientation, i.e. is reverse oriented
-                # this is to ensure that the oedge_c is always consistent with the overall surface orientation
-                oedge_c = c ? oedge_ : reverse(oedge_)
-                enqueue!(queue,(oedge_c,fid_))
-            end
+            !check_orientability && haskey(FID2C,fid_) && continue
+            # reverse edge direction if original face has inconsistent orientation, i.e. is reverse oriented
+            # this is to ensure that the oedge_c is always consistent with the overall surface orientation
+            oedge_c = c ? oedge_ : reverse(oedge_)
+            enqueue!(queue,(oedge_c,fid_))
         end
     end
-    @assert length(fids_covered) == length(faces)
+    return FID2C
+end
+# find consistent orientation for all faces via BFS on face connectivity
+function orient_faces(faces::Vector{F}, E2FID::FIDDictwo{_Edge}; check_orientability::Bool=true) where F<:AbstractVector{VID}
+    # glossary: C - a boolean denoting if a face, by its vec-of-vids definition, has consistent orientation with the overall surface orientation
+    @assert !isempty(faces)
+    queue = Queue{Tuple{_OEdge,FID}}()
+    FID2C = Dict{FID,Bool}()
+    fids = FID(1):length(faces)
+    
+    showprogress = length(faces) > 10000
+    
+    ncomponents = 0
+    showprogress && println('_'^100)
+    while length(FID2C) != length(faces)
+        # pick a face and enqueue oedge-fid pairs for all adjacent faces
+        fid = fids[findfirst(!in(keys(FID2C)), fids)]
+        FID2C[fid] = true
+        showprogress && g(length(FID2C),length(faces),100) && print("#")
+        
+        for oefid in adjacent_oedgefids(fid,faces,E2FID)
+            enqueue!(queue,oefid)
+        end
+        # @show ncomponents, fid
+        _orient_faces!(faces,E2FID,FID2C,queue;check_orientability)
+        ncomponents += 1
+    end
+    showprogress && println()
+    @show ncomponents
     return FID2C
 end
 
@@ -486,3 +524,4 @@ twin(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.twin)
 #= #TODO:
 
 =#
+
