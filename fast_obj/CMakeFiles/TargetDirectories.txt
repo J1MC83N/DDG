@@ -1,0 +1,7 @@
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/fast_obj_jl.dir
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/edit_cache.dir
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/rebuild_cache.dir
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/list_install_components.dir
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/install.dir
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/install/local.dir
+/Users/qihong.chen/Puter/Programss/DDG/fast_obj/CMakeFiles/install/strip.dir

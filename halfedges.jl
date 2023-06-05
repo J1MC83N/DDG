@@ -11,6 +11,16 @@ Naming conventions:
 
 using Pkg; Pkg.activate(".")
 using Meshes, StaticArrays, UnPack, Multisets, Bijections, DataStructures, IterTools
+using TimerOutputs; const to = TimerOutput(); disable_timer!(to)
+
+macro threads_maybe(ex)
+    THREADED = false
+    if !THREADED || Threads.nthreads() == 1
+        return esc(ex)
+    else
+        return esc(:(Threads.@threads $ex))
+    end
+end
 
 # function _gi(ex::Expr)
 #     ex.head === :call || return ex
@@ -308,67 +318,71 @@ g(i,imax,n) = f(i-1,imax,n) >= f(i,imax,n) < f(i+1,imax,n)
 function _orient_faces!(
     faces::Vector{F}, 
     E2FID::FIDDictwo{_Edge}, 
-    FID2C::Dict{FID,Bool}, 
+    FID2O::Vector{Bool},
+    noriented::Int,
+    FID2C::Vector{Bool}, 
     queue::Queue{Tuple{_OEdge,FID}};
-    check_orientability::Bool) where F<:AbstractVector{VID}
+    check_orientability::Bool,
+    show_progress::Bool) where F<:AbstractVector{VID}
     
-    showprogress = length(faces) > 10000
     while !isempty(queue)
         oedge,fid = dequeue!(queue)
         face = faces[fid]
         _,is_right_order = search_cycpair(face,oedge)
         c = !is_right_order # an consistent orientation means that oedge of this adjacent face is in reverse direction
-        if haskey(FID2C,fid)
+        if FID2O[fid]
             check_orientability && c != FID2C[fid] && error("inconsistent orientation for face($fid): $(faces[fid])")
             continue
         end
+        FID2O[fid] = true; noriented += 1
         FID2C[fid] = c
         # print(length(FID2C)," ")
-        showprogress && g(length(FID2C),length(faces),100) && print("#")
+        show_progress && g(noriented,length(faces),100) && print("#")
         
         # add adjacent faces to search queue
         for (oedge_,fid_) in adjacent_oedgefids(fid,faces,E2FID)
-            !check_orientability && haskey(FID2C,fid_) && continue
+            !check_orientability && FID2O[fid_] && continue
             # reverse edge direction if original face has inconsistent orientation, i.e. is reverse oriented
             # this is to ensure that the oedge_c is always consistent with the overall surface orientation
             oedge_c = c ? oedge_ : reverse(oedge_)
             enqueue!(queue,(oedge_c,fid_))
         end
     end
-    return FID2C
+    return noriented
 end
 # find consistent orientation for all faces via BFS on face connectivity
-function orient_faces(faces::Vector{F}, E2FID::FIDDictwo{_Edge}; check_orientability::Bool=true) where F<:AbstractVector{VID}
+function orient_faces(faces::Vector{F}, E2FID::FIDDictwo{_Edge}; check_orientability::Bool=true, show_progress::Bool) where F<:AbstractVector{VID}
     # glossary: C - a boolean denoting if a face, by its vec-of-vids definition, has consistent orientation with the overall surface orientation
     @assert !isempty(faces)
     queue = Queue{Tuple{_OEdge,FID}}()
-    FID2C = Dict{FID,Bool}()
+    FID2O = zeros(Bool,length(faces))
+    noriented = 0
+    FID2C = Vector{Bool}(undef,length(faces))
     fids = FID(1):length(faces)
     
-    showprogress = length(faces) > 10000
-    
     ncomponents = 0
-    showprogress && println('_'^100)
-    while length(FID2C) != length(faces)
+    show_progress && println('-'^100)
+    while noriented != length(faces)
         # pick a face and enqueue oedge-fid pairs for all adjacent faces
-        fid = fids[findfirst(!in(keys(FID2C)), fids)]
+        fid = fids[findfirst(!, FID2O)]
+        FID2O[fid] = true; noriented += 1
         FID2C[fid] = true
-        showprogress && g(length(FID2C),length(faces),100) && print("#")
+        show_progress && g(noriented,length(faces),100) && print("#")
         
         for oefid in adjacent_oedgefids(fid,faces,E2FID)
             enqueue!(queue,oefid)
         end
         # @show ncomponents, fid
-        _orient_faces!(faces,E2FID,FID2C,queue;check_orientability)
+        noriented = _orient_faces!(faces,E2FID,FID2O,noriented,FID2C,queue;check_orientability,show_progress)
         ncomponents += 1
     end
-    showprogress && println()
-    @show ncomponents
+    show_progress && println()
+    # @show ncomponents
     return FID2C
 end
 
 modoff1(x::T,y::Integer) where T = T(mod(x-1,y)+1)
-function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) where {N,F<:AbstractVector{VID}}
+function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); check_orientability::Bool=true, show_progress::Bool=length(polys)>10^5) where {N,F<:AbstractVector{VID}}
     # polys provides face=>edge assocation
     nf = length(polys)
     @assert N == 0 || all(f->length(f)==N,polys)
@@ -380,19 +394,20 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) wh
     
     IE2E = Bijection{Int,_Edge}() # edge associated with edge index
     ie = 1 # edge index pointer
-    FID2F = Bijection{FID,F}() # face associated with face ID
+    # FID2F = Bijection{FID,F}() # face associated with face ID
     E2FID = FIDDictwo{_Edge}() # edge associated with one or two faces
     
-    # construct FID2F and E2FID
-    for (iface,poly) in enumerate(polys)
-        FID2F[iface] = poly
+    # construct E2FID
+    @timeit to "E2FID construction" for (iface,poly) in enumerate(polys)
+        # @timeit to "FID2F" FID2F[iface] = poly
         for (v1,v2) in cyclic_pairs(poly)
             edge = _Edge(v1,v2)
-            !in(edge,image(IE2E)) && (IE2E[ie] = edge; ie += 1)
+            !in(edge,IE2E.range) && (IE2E[ie] = edge; ie += 1)
             add!(E2FID,edge,iface)
         end
     end
-    FID2C = orient_faces(polys,E2FID)
+    show_progress && println("Orienting faces...")
+    @timeit to "face orientation" FID2C = orient_faces(polys, E2FID; check_orientability, show_progress)
 
     # now E2FID.K22V has all internal edges, E2FID.K21V has all boundary edges
     ne = length(IE2E)
@@ -406,7 +421,9 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) wh
     # for computing h2next at boundaries; record v2v connectivity and hid
     V2VHID_boundary = Dict{VID,Tuple{VID,HID}}()
     
-    for ie = 1:ne
+    show_progress && println("Constructing mesh...\n", '-'^100)
+    @timeit to "mesh construction" @threads_maybe for ie = 1:ne
+        show_progress && g(ie,ne,100) && print("#")
         edge = IE2E[ie]
         v1id,v2id = oedge = Tuple(edge)
         
@@ -445,6 +462,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) wh
             V2VHID_boundary[vid_from] = (vid_to, hids[2])
         end
     end
+    show_progress && println()
     
     # completing h2next for boundary halfedge
     for (vid_from,(vid_to,hid)) in V2VHID_boundary
@@ -458,9 +476,9 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys))) wh
     
     return IHTopology{N}(h2next,h2v,h2f,v2h,f2h)
 end
-function IHTopology{N}(polys::Vector{F}) where {N,F<:AbstractVector{<:Integer}}
+function IHTopology{N}(polys::Vector{F},nv::Int=Int(maximum(maximum,polys)); check_orientability::Bool=true, show_progress::Bool=length(polys)>10^5) where {N,F<:AbstractVector{<:Integer}}
     polys_ = [convert.(VID,face) for face in polys]
-    IHTopology{N}(polys_)
+    IHTopology{N}(polys_, nv; check_orientability, show_progress)
 end
 
 
@@ -525,3 +543,19 @@ twin(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.twin)
 
 =#
 
+
+# using PProf
+# function _profile(n::Int)
+#     h,f,v = HID(1),FID(1),VID(1)
+#     for i in 1:n
+#         mesh = IHTopology{0}("test-obj/trumpet.obj")
+#         @unpack h2next, h2v, h2f, v2h, f2h = mesh
+#         h += rand(h2next)+rand(v2h)+rand(f2h)
+#         f += rand(h2f)
+#         v += rand(h2v)
+#     end
+#     return h,f,v
+# end
+# Profile.clear()
+# @profile _profile(10)
+# pprof()

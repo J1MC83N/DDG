@@ -30,6 +30,39 @@ addtofix1!(topoint,tovec)
 toface(mesh::IHMesh, f::FID) = mesh[f]
 toface(mesh::IHMesh, h::HID) = mesh[face(mesh,h)]
 
+
+using FastOBJ
+
+function obj_read(filename::AbstractString)
+    @assert isfile(filename)
+    @timeit to "fast_obj read" mptr = fast_obj_read(filename)
+    m = mptr[]
+    positions = unsafe_wrap(Vector{Cfloat},Ptr{Cfloat}(m.positions)+3sizeof(Cfloat),(m.position_count-1)*3)
+    vertices = copy(reinterpret(reshape, Point{3,Cfloat}, reshape(positions, 3, :)))
+    
+    face_counts = unsafe_wrap(Vector{Cint},Ptr{Cint}(m.face_vertices),m.face_count)
+    N = allequal(face_counts) ? Int(first(face_counts)) : 0
+    faces = Vector{Vector{VID}}(undef, m.face_count)
+    i_index = 1
+    @timeit to "face connectivity construction" for (fid,count) in enumerate(face_counts)
+        face = Vector{VID}(undef, count)
+        for ifv in 1:count
+            face[ifv] = VID(m.indices[i_index].p)
+            i_index += 1
+        end
+        faces[fid] = face
+    end
+    fast_obj_destroy(mptr)
+    return vertices,faces,N
+end
+
+function IHMesh(filename::AbstractString; check_orientability::Bool=true, show_progress::Union{Nothing,Bool}=nothing)
+    something(show_progress,false) && println("Reading obj file...")
+    @timeit to "obj read" vertices,faces,N = obj_read(filename)
+    show_progress = isnothing(show_progress) ? length(faces)>10^5 : show_progress
+    IHMesh(vertices, IHTopology{N}(faces, length(vertices); check_orientability, show_progress))
+end
+
 for VXIterator in [:VHIterator, :VVIterator, :VFIterator, :VIFIterator, :VCIterator, :VICIterator]
     @eval $VXIterator(mesh::IHMesh, v::VID) = $VXIterator(topology(mesh),v)
 end
@@ -113,29 +146,76 @@ function vn_fun_iter(mesh::Mesh, v::VID, ::MeanCurvature)
     (fun, VHIterator(mesh, v))
 end
 
-function IHMesh{3,T,V,N}(objfile::AbstractString) where {T,V,N}
-    vertices = Point{3, T}[]
-    soup = Vector{VID}[]
-    for line in eachline(objfile)
-        point = matchf(r"^v ([ \-\d.]*)$", line) do m::RegexMatch
-            parse.(T,split(m.captures[1]))
-        end
-        !isnothing(point) && push!(vertices,Point{3, T}(point))
-        poly = matchf(r"^f ([ \d]*)$", line) do m::RegexMatch
-            parse.(VID,split(m.captures[1]))
-        end
-        !isnothing(poly) && push!(soup,poly)
-    end
-    return IHMesh{3,T,V,N}(vertices,IHTopology{N}(soup,nvertices_obj(objfile)))
-end
-IHMesh(objfile::AbstractString, N::Int) = IHMesh{3,Float32,Vector{Point{3,Float32}},N}(objfile)
+# function IHMesh{3,T,V,N}(objfile::AbstractString) where {T,V,N}
+#     vertices = Point{3, T}[]
+#     soup = Vector{VID}[]
+#     for line in eachline(objfile)
+#         point = matchf(r"^v ([ \-\d.]*)$", line) do m::RegexMatch
+#             parse.(T,split(m.captures[1]))
+#         end
+#         !isnothing(point) && push!(vertices,Point{3, T}(point))
+#         poly = matchf(r"^f ([ \d]*)$", line) do m::RegexMatch
+#             parse.(VID,split(m.captures[1]))
+#         end
+#         !isnothing(poly) && push!(soup,poly)
+#     end
+#     return IHMesh{3,T,V,N}(vertices,IHTopology{N}(soup,nvertices_obj(objfile)))
+# end
+# IHMesh(objfile::AbstractString, N::Int) = IHMesh{3,Float32,Vector{Point{3,Float32}},N}(objfile)
 
-_topo = IHTopology{3}([[1,2,3],[2,3,4]])
-_gourd = IHTopology{3}("test-obj/gourd.obj")
+# _topo = IHTopology{3}([[1,2,3],[2,3,4]])
+# _gourd = IHTopology{3}("test-obj/gourd.obj")
 
-_mesh = IHMesh(Point2[(0,0),(0,1),(1,0),(1,1)],_topo)
-_mesh3 = IHMesh(Point3[(0,0,0),(0,1,0),(1,0,0),(1,1,0)],_topo)
-_topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]])
-_pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], _topo_pyramid)
-_pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], _topo_pyramid)
-_face = _mesh[1]
+# _mesh = IHMesh(Point2[(0,0),(0,1),(1,0),(1,1)],_topo)
+# _mesh3 = IHMesh(Point3[(0,0,0),(0,1,0),(1,0,0),(1,1,0)],_topo)
+# _topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]])
+# _pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], _topo_pyramid)
+# _pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], _topo_pyramid)
+# _face = _mesh[1]
+
+
+
+using Profile, PProf
+enable_timer!(to)
+IHMesh("test-obj/arrowhead.obj",show_progress=false)
+reset_timer!(to)
+@time IHMesh("test-obj/arrowhead.obj",show_progress=false)
+to
+# single thread
+"""
+1.186321 seconds (1.69 M allocations: 458.016 MiB, 6.17% gc time)
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+                                                     Time                    Allocations      
+                                            ───────────────────────   ────────────────────────
+              Tot / % measured:                  1.21s /  97.4%            459MiB /  91.1%    
+
+ Section                            ncalls     time    %tot     avg     alloc    %tot      avg
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+ mesh construction                       1    418ms   35.4%   418ms   42.9MiB   10.3%  42.9MiB
+ E2FID construction                      1    380ms   32.2%   380ms    218MiB   52.1%   218MiB
+ face orientation                        1    233ms   19.7%   233ms    124MiB   29.6%   124MiB
+ obj read                                1    148ms   12.6%   148ms   33.6MiB    8.0%  33.6MiB
+   fast_obj read                         1    129ms   10.9%   129ms     0.00B    0.0%    0.00B
+   face connectivity construction        1   18.3ms    1.6%  18.3ms   28.6MiB    6.8%  28.6MiB
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+"""
+# reset_timer!(to)
+# @time IHMesh("test-obj/dragon.obj",show_progress=false)
+# to
+"""
+19.666659 seconds (22.54 M allocations: 6.750 GiB, 4.48% gc time)
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+                                                     Time                    Allocations      
+                                            ───────────────────────   ────────────────────────
+              Tot / % measured:                  19.7s /  99.1%           6.75GiB /  92.3%    
+
+ Section                            ncalls     time    %tot     avg     alloc    %tot      avg
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+ E2FID construction                      1    7.94s   40.7%   7.94s   3.62GiB   58.1%  3.62GiB
+ mesh construction                       1    5.92s   30.3%   5.92s    572MiB    9.0%   572MiB
+ face orientation                        1    4.17s   21.4%   4.17s   1.61GiB   25.9%  1.61GiB
+ obj read                                1    1.49s    7.6%   1.49s    448MiB    7.0%   448MiB
+   fast_obj read                         1    1.12s    5.7%   1.12s     0.00B    0.0%    0.00B
+   face connectivity construction        1    324ms    1.7%   324ms    381MiB    6.0%   381MiB
+"""
+ @pprof IHMesh("test-obj/dragon.obj",show_progress=false)
