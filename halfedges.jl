@@ -22,6 +22,14 @@ macro threads_maybe(ex)
     end
 end
 
+function Base.sizehint!(B::Bijection, n::Integer)
+    sizehint!(B.domain, n)
+    sizehint!(B.f, n)
+    sizehint!(B.finv, n)
+    sizehint!(B.range, n)
+    B
+end
+
 # function _gi(ex::Expr)
 #     ex.head === :call || return ex
 #     return if ex.args[1] === :|>
@@ -392,10 +400,13 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     v2isused = zeros(Bool,nv)
     for poly in polys, vid in poly; v2isused[vid] = true; end
     
+    ne_approx = sum(length,polys)÷2
     IE2E = Bijection{Int,_Edge}() # edge associated with edge index
+    sizehint!(IE2E,ne_approx)
     ie = 1 # edge index pointer
     # FID2F = Bijection{FID,F}() # face associated with face ID
     E2FID = FIDDictwo{_Edge}() # edge associated with one or two faces
+    sizehint!(E2FID,ne_approx)
     
     # construct E2FID
     @timeit to "E2FID construction" for (iface,poly) in enumerate(polys)
@@ -474,7 +485,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
         isused || (v2h[i] = INVALID_ID)
     end
     
-    @exfiltrate
+    # @exfiltrate
     return IHTopology{N}(h2next,h2v,h2f,v2h,f2h)
 end
 function IHTopology{N}(polys::Vector{F},nv::Int=Int(maximum(maximum,polys)); check_orientability::Bool=true, show_progress::Bool=length(polys)>10^5) where {N,F<:AbstractVector{<:Integer}}

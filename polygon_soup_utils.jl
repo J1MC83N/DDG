@@ -62,6 +62,8 @@ else
 
     @inline first(s::HandleSetwo{T}) where T<:Handle = (s.data>>64) % T
     @inline last(s::HandleSetwo{T}) where T<:Handle = s.data % T
+    import Base: hash
+    hash(s::HandleSetwo{T},h::UInt) where T = hash(first(s),hash(last(s),h))
 end
 
 """
@@ -82,7 +84,7 @@ struct Dictwo{K,V,S<:AbstractSetwo{V}} <: AbstractDict{K,Union{V,S}}
 end
 Dictwo(K21V::Dict{K,V},K22V::Dict{K,S}) where {K,V,S<:AbstractSetwo{V}} = Dictwo{K,V,S}(K21V,K22V)
 
-import Base: getindex, haskey, get, setindex!, length, iterate
+import Base: getindex, haskey, get, setindex!, length, iterate, sizehint!
 getdicts(d::Dictwo) = (d.K21V,d.K22V)
 haskey(d::Dictwo,key) = haskey(d.K21V,key) || haskey(d.K22V,key)
 haskey1(d::Dictwo,key) = haskey(d.K21V,key)
@@ -108,6 +110,7 @@ function setindex!(d::Dictwo{K,V,<:Any},v0,key::K) where {K,V}
     haskey(K22V,key) && delete!(K22V,key)
     setindex!(K21V,v,key)
 end
+sizehint!(d::Dictwo,n::Integer) = (sizehint!(d.K21V,n); sizehint!(d.K22V,n); d)
 
 """
     add!(d::Dictwo, key, v)
@@ -117,9 +120,9 @@ Add a key=>value pair to a Dictwo. If the key is already associated with another
 function add!(d::Dictwo{K,V,S},key::K,v) where {K,V,S<:AbstractSetwo{V}}
     haskey(d.K22V,key) && error("Dictwo already has two values associated key $key")
     if !haskey(d.K21V,key) # new key; adding to K21V
-        d.K21V[key] = v
+        @inbounds d.K21V[key] = v
     else # already one value associated with key; moving to K22V
-        d.K22V[key] = S(d.K21V[key],v)
+        @inbounds d.K22V[key] = S(d.K21V[key],v)
         delete!(d.K21V,key)
     end
     return d

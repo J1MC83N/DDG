@@ -183,39 +183,40 @@ reset_timer!(to)
 to
 # single thread
 """
-1.186321 seconds (1.69 M allocations: 458.016 MiB, 6.17% gc time)
+1.009356 seconds (1.69 M allocations: 437.623 MiB)
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
                                             ───────────────────────   ────────────────────────
-              Tot / % measured:                  1.21s /  97.4%            459MiB /  91.1%    
+              Tot / % measured:                  1.04s /  96.2%            439MiB /  77.4%    
 
  Section                            ncalls     time    %tot     avg     alloc    %tot      avg
  ─────────────────────────────────────────────────────────────────────────────────────────────
- mesh construction                       1    418ms   35.4%   418ms   42.9MiB   10.3%  42.9MiB
- E2FID construction                      1    380ms   32.2%   380ms    218MiB   52.1%   218MiB
- face orientation                        1    233ms   19.7%   233ms    124MiB   29.6%   124MiB
- obj read                                1    148ms   12.6%   148ms   33.6MiB    8.0%  33.6MiB
-   fast_obj read                         1    129ms   10.9%   129ms     0.00B    0.0%    0.00B
-   face connectivity construction        1   18.3ms    1.6%  18.3ms   28.6MiB    6.8%  28.6MiB
- ─────────────────────────────────────────────────────────────────────────────────────────────
-"""
+ mesh construction                       1    362ms   36.4%   362ms   42.9MiB   12.6%  42.9MiB
+ E2FID construction                      1    288ms   28.9%   288ms    139MiB   41.0%   139MiB
+ face orientation                        1    208ms   20.8%   208ms    124MiB   36.5%   124MiB
+ obj read                                1    138ms   13.9%   138ms   33.6MiB    9.9%  33.6MiB
+   fast_obj read                         1    120ms   12.0%   120ms     0.00B    0.0%    0.00B
+   face connectivity construction        1   16.7ms    1.7%  16.7ms   28.6MiB    8.4%  28.6MiB
+ ─────────────────────────────────────────────────────────────────────────────────────────────"""
 # reset_timer!(to)
 # @time IHMesh("test-obj/dragon.obj",show_progress=false)
 # to
 """
-19.666659 seconds (22.54 M allocations: 6.750 GiB, 4.48% gc time)
+16.962933 seconds (22.54 M allocations: 5.222 GiB, 4.54% gc time)
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
                                             ───────────────────────   ────────────────────────
-              Tot / % measured:                  19.7s /  99.1%           6.75GiB /  92.3%    
+              Tot / % measured:                  17.0s /  97.1%           5.22GiB /  50.0%    
 
  Section                            ncalls     time    %tot     avg     alloc    %tot      avg
  ─────────────────────────────────────────────────────────────────────────────────────────────
- E2FID construction                      1    7.94s   40.7%   7.94s   3.62GiB   58.1%  3.62GiB
- mesh construction                       1    5.92s   30.3%   5.92s    572MiB    9.0%   572MiB
- face orientation                        1    4.17s   21.4%   4.17s   1.61GiB   25.9%  1.61GiB
- obj read                                1    1.49s    7.6%   1.49s    448MiB    7.0%   448MiB
-   fast_obj read                         1    1.12s    5.7%   1.12s     0.00B    0.0%    0.00B
-   face connectivity construction        1    324ms    1.7%   324ms    381MiB    6.0%   381MiB
-"""
-#  @pprof IHMesh("test-obj/dragon.obj",show_progress=false)
+ E2FID construction                      1    5.66s   34.3%   5.66s     0.00B    0.0%    0.00B
+ mesh construction                       1    5.30s   32.1%   5.30s    572MiB   21.4%   572MiB
+ face orientation                        1    4.02s   24.4%   4.02s   1.61GiB   61.8%  1.61GiB
+ obj read                                1    1.51s    9.2%   1.51s    448MiB   16.8%   448MiB
+   fast_obj read                         1    1.19s    7.2%   1.19s     0.00B    0.0%    0.00B
+   face connectivity construction        1    278ms    1.7%   278ms    381MiB   14.3%   381MiB
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+ """
+
+@pprof IHMesh("test-obj/dragon.obj",show_progress=false)
