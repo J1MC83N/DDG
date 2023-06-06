@@ -183,24 +183,25 @@ reset_timer!(to)
 to
 # single thread
 """
-1.009356 seconds (1.69 M allocations: 437.623 MiB)
+0.971960 seconds (1.69 M allocations: 374.283 MiB, 4.65% gc time)
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
                                             ───────────────────────   ────────────────────────
-              Tot / % measured:                  1.04s /  96.2%            439MiB /  77.4%    
+              Tot / % measured:                  996ms /  96.7%            375MiB /  53.4%    
 
  Section                            ncalls     time    %tot     avg     alloc    %tot      avg
  ─────────────────────────────────────────────────────────────────────────────────────────────
- mesh construction                       1    362ms   36.4%   362ms   42.9MiB   12.6%  42.9MiB
- E2FID construction                      1    288ms   28.9%   288ms    139MiB   41.0%   139MiB
- face orientation                        1    208ms   20.8%   208ms    124MiB   36.5%   124MiB
- obj read                                1    138ms   13.9%   138ms   33.6MiB    9.9%  33.6MiB
-   fast_obj read                         1    120ms   12.0%   120ms     0.00B    0.0%    0.00B
-   face connectivity construction        1   16.7ms    1.7%  16.7ms   28.6MiB    8.4%  28.6MiB
- ─────────────────────────────────────────────────────────────────────────────────────────────"""
-# reset_timer!(to)
-# @time IHMesh("test-obj/dragon.obj",show_progress=false)
-# to
+ mesh construction                       1    335ms   34.8%   335ms   42.9MiB   21.4%  42.9MiB
+ E2FID construction                      1    237ms   24.6%   237ms     0.00B    0.0%    0.00B
+ face orientation                        1    214ms   22.2%   214ms    124MiB   61.8%   124MiB
+ obj read                                1    177ms   18.4%   177ms   33.6MiB   16.8%  33.6MiB
+   fast_obj read                         1    127ms   13.2%   127ms     0.00B    0.0%    0.00B
+   face connectivity construction        1   48.2ms    5.0%  48.2ms   28.6MiB   14.3%  28.6MiB
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+"""
+reset_timer!(to)
+@time IHMesh("test-obj/dragon.obj",show_progress=false)
+to
 """
 16.962933 seconds (22.54 M allocations: 5.222 GiB, 4.54% gc time)
  ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -219,4 +220,4 @@ to
  ─────────────────────────────────────────────────────────────────────────────────────────────
  """
 
-@pprof IHMesh("test-obj/dragon.obj",show_progress=false)
+# @pprof IHMesh("test-obj/dragon.obj",show_progress=false)

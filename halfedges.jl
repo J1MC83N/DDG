@@ -313,8 +313,9 @@ function adjacent_oedgefids(fid::FID,faces::Vector{F},E2FID::FIDDictwo{_Edge}) w
     oefids = Tuple{_OEdge,FID}[]
     for oedge in cyclic_pairs(face) # sides of polygon face
         edge = _Edge(oedge)
-        !haskey2(E2FID,edge) && continue
-        fid_ = other(get2(E2FID,edge),fid)
+        fids = gettwo(E2FID,edge,nothing)
+        isnothing(fids) && continue
+        fid_ = other(fids,fid)
         push!(oefids,(oedge,fid_))
     end
     return oefids
@@ -464,7 +465,8 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
             oedges = cyclic_pairs(face)
             iedge_in_face,_ = _search_cycpair(oedges,oedge)
             nextedge = oedges[modoff1(iedge_in_face-(-1)^c,length(face))] |> _Edge
-            ih_next = 2*IE2E(nextedge)-1 + (haskey1(E2FID,nextedge) ? 0 : islast(fid,get2(E2FID,nextedge)))
+            fids_nextedge = gettwo(E2FID,nextedge,nothing)
+            ih_next = 2*IE2E(nextedge)-1 + (isnothing(fids_nextedge) ? 0 : islast(fid,fids_nextedge))
             h2next[hid] = ih_next
         end
         # working towads h2next for boundary halfedge
