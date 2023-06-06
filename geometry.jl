@@ -218,4 +218,4 @@ to
    fast_obj read                         1    1.12s    5.7%   1.12s     0.00B    0.0%    0.00B
    face connectivity construction        1    324ms    1.7%   324ms    381MiB    6.0%   381MiB
 """
- @pprof IHMesh("test-obj/dragon.obj",show_progress=false)
+#  @pprof IHMesh("test-obj/dragon.obj",show_progress=false)

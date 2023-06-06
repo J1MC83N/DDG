@@ -28,7 +28,9 @@ struct Setwo{T} <: AbstractSetwo{T}
 end
 Setwo(data::NTuple{2,T}) where T = Setwo{T}(data)
 Setwo{T}(a::T,b::T) where T = Setwo{T}((a,b))
+Setwo{T}(a,b) where T = Setwo{T}(convert(T,a), convert(T,b))
 Setwo(a::T,b::T) where T = Setwo{T}((a,b))
+default_setwo_type(::Type{T}) where T = Setwo{T}
 
 @inbounds first(s::Setwo) = s.data[1]
 @inbounds last(s::Setwo) = s.data[2]
@@ -51,7 +53,7 @@ else
     HandleSetwo(a::T,b::T) where T<:Handle = HandleSetwo{T}(a,b)
     HandleSetwo{T}(a::Integer,b::Integer) where T<:Handle = HandleSetwo{T}(T(a),T(b))
     HandleSetwo{T}(data::NTuple{2,T}) where T<:Handle = HandleSetwo{T}(data...)
-
+    default_setwo_type(::Type{T}) where T<:Handle = HandleSetwo{T}
     # define type alias for HandleSetwo of specific handle types
     # i.e. HIDSetwo => HandleSetwo{HalfEdgeHandle}
     for (tname,alias) in _Handle2Alias
@@ -152,49 +154,137 @@ else
     end
 end
 
+# using DataStructures: IntSet, findnextidx
+# """
+#     struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
 
-using DataStructures: IntSet, findnextidx
-struct DenseIntDict{V} <: AbstractDict{Int,V}
-    keys::IntSet
-    values::Vector{V}
-    function DenseIntDict{V}(;sizehint::Int=64) where V
-        keys = sizehint!(IntSet(),sizehint)
-        values = Vector{V}(undef,sizehint)
-        new{V}(keys,values)
-    end
-end
+# Thin wrapper around `IntSet` from DataStructures that supports arbitrary Unsigned integer types. 
+# """
+# struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
+#     data::IntSet
+#     UnsignedSet{T}(data::IntSet) where T<:Unsigned = new{T}(data)
+# end
+# UnsignedSet{T}(itr) where T = UnsignedSet{T}(IntSet(itr))
+# UnsignedSet{T}() where T = UnsignedSet{T}(IntSet())
 
-import Base: getindex, haskey, keys, get, setindex!, length, iterate, isempty
-keys(d::DenseIntDict) = d.keys
-haskey(d::DenseIntDict, key::Integer) = key in keys(d)
-length(d::DenseIntDict) = length(keys(d))
-getindex(d::DenseIntDict{V}, key::Integer) where V = @inbounds !haskey(d,key) ? throw(KeyError(key)) : d.values[key+1]::V
-function setindex!(d::DenseIntDict{V}, v::V, key::Integer) where V
-    keys,values = d.keys,d.values
-    if key > length(values)-1
-        newlen = 1 + key + key>>1
-        resize!(values, newlen)
-    end
-    push!(keys, key)
-    @inbounds values[key+1] = v
-    return d
-end
-setindex!(d::DenseIntDict{V}, v0, key::Integer) where V = setindex!(d,convert(V,v0),key)
-get(d::DenseIntDict{V}, key::Integer, default) where V = haskey(d,key) ? d[key]::V : default
-isempty(d::DenseIntDict) = isempty(keys(d))
-function iterate(d::DenseIntDict)
-    isempty(d) && return nothing
-    i,state_keys = iterate(keys(d))
-    return (i => d[i], state_keys)
-end
-function iterate(d::DenseIntDict, state_keys)
-    next = iterate(keys(d),state_keys)
-    isnothing(next) && return nothing
-    i,state_keys = next
-    return (i => d[i], state_keys)
-end
-findnextelem(s::IntSet, i::Int, invert::Bool=false) = findnextidx(s,i+1,invert)-1
+# import Base: first, last, iterate, length, in, sizehint!, empty!, delete!, push!
+# first(s::UnsignedSet{T}) where T = T(first(s.data))
+# last(s::UnsignedSet{T}) where T = T(last(s.data))
+# function iterate(s::UnsignedSet{T}) where T
+#     it = iterate(s.data)
+#     isnothing(it) && return nothing
+#     val,state = it
+#     return T(val),state
+# end
+# function iterate(s::UnsignedSet{T},state) where T
+#     it = iterate(s.data,state)
+#     isnothing(it) && return nothing
+#     val,state = it
+#     return T(val),state
+# end
+# length(s::UnsignedSet) = length(s.data)
+# in(val::Integer,s::UnsignedSet) = val in s.data
+# sizehint!(s::UnsignedSet, n::Integer) = (sizehint!(s.data, n); s)
+# empty!(s::UnsignedSet) = (empty!(s.data); s)
+# delete!(s::UnsignedSet, n::Integer) = (delete!(s.data, n); s)
+# push!(s::UnsignedSet, n::Integer) = (push!(s.data, n); s)
+# push!(s::IntSet, ns::Integer...) = (push!(s.data, ns...); s)
+# findnextelem(s::IntSet, i::Int, invert::Bool=false) = findnextidx(s,i+1,invert)-1
+# findnextelem(s::UnsignedSet{T}, i::Int, invert::Bool=false) where T = T(findnextelem(s,i,invert))
 
+
+# struct IntegerDict{K<:Unsigned,V} <: AbstractDict{K,V}
+#     keys::UnsignedSet
+#     values::Vector{V}
+#     function IntegerDict{K,V}(;sizehint::Int=64) where {K<:Unsigned,V}
+#         keys = sizehint!(UnsignedSet{K}(),sizehint)
+#         values = Vector{V}(undef,sizehint)
+#         new{K,V}(keys,values)
+#     end
+# end
+
+# import Base: getindex, haskey, keys, get, setindex!, length, iterate, isempty
+# keys(d::IntegerDict) = d.keys
+# haskey(d::IntegerDict, key::Integer) = key in keys(d)
+# length(d::IntegerDict) = length(keys(d))
+# getindex(d::IntegerDict{K,V}, key::Integer) where {K,V} = @inbounds !haskey(d,key) ? throw(KeyError(key)) : d.values[key+1]::V
+# function setindex!(d::IntegerDict{K,V}, v::V, key::Integer) where {K,V}
+#     keys,values = d.keys,d.values
+#     if key > length(values)-1
+#         newlen = 1 + key + key>>1
+#         resize!(values, newlen)
+#     end
+#     push!(keys, key)
+#     @inbounds values[key+1] = v
+#     return d
+# end
+# setindex!(d::IntegerDict{K,V}, v0, key::Integer) where {K,V} = setindex!(d,convert(V,v0),key)
+# get(d::IntegerDict{K,V}, key::Integer, default) where {K,V} = haskey(d,key) ? d[key]::V : default
+# isempty(d::IntegerDict) = isempty(keys(d))
+# function iterate(d::IntegerDict)
+#     isempty(d) && return nothing
+#     i,state_keys = iterate(keys(d))
+#     return (i => d[i], state_keys)
+# end
+# function iterate(d::IntegerDict, state_keys)
+#     next = iterate(keys(d),state_keys)
+#     isnothing(next) && return nothing
+#     i,state_keys = next
+#     return (i => d[i], state_keys)
+# end
+# import DataStructures: capacity
+# capacity(d::IntegerDict) = length(d.values)
+# keyslots(d::IntegerDict{K}) where K = zero(K):K(capacity(d)-1)
+
+
+# const Unsigned2D{T<:Unsigned} = Union{NTuple{2,T},AbstractSetwo{T}}
+# struct U2DDict{T<:Unsigned,K<:Unsigned2D{T},V,D<:AbstractDict{T,V}} <: AbstractDict{K,V}
+#     data::IntegerDict{T,D}
+#     function U2DDict{T,K,V,D}(data::IntegerDict{T,D}) where {T<:Unsigned,K<:Unsigned2D{T},V,D<:AbstractDict{T,V}}
+#         new{T,K,V,D}(data)
+#     end
+#     function U2DDict{T,K,V,D}(;sizehint_intdict=16) where {T<:Unsigned,K<:Unsigned2D{T},V,D<:AbstractDict{T,V}}
+#         data = IntegerDict{T,D}(sizehint=sizehint_intdict)
+#         new{T,K,V,D}(data)
+#     end
+# end
+# U2DDict(data::IntegerDict{T,D}) where {T,V,D<:AbstractDict{T,V}} = U2DDict{T,default_setwo_type(T),V,D}(data)
+
+# import Base: getindex, haskey, get, setindex!, length, iterate, isempty
+# getindex(dict::U2DDict{T,K,V}, key::K) where {T,K,V} = dict.data[first(key)][last(key)]::V
+# haskey(dict::U2DDict{T,K}, key::K) where {T,K} = haskey(dict.data,first(key)) && haskey(dict.data[first(key)],last(key))
+# get(dict::U2DDict{T,K,V}, key::K, default) where {T,K,V} = haskey(dict, key) ? dict[key]::V : default
+# function setindex!(dict::U2DDict{T,K,V,D}, v::V, key::K) where {T,K,V,D}
+#     key1,key2 = key
+#     valdict = get!(dict.data,key1,D())
+#     valdict[key2] = v
+#     dict
+# end
+# setindex!(dict::U2DDict{T,K,V,D}, v0, key::K) where {T,K,V,D} = setindex!(dict,convert(V,v0),key)
+# isempty(dict::U2DDict) = all(isempty, dict.data)
+# length(dict::U2DDict) = sum(length,values(dict.data))
+# iterator(dict::U2DDict{T,K,V,D}) where {T,K,V,D} = (K(key1,key2)=>val for (key1::T,valdict::D) in dict.data for (key2::T,val::V) in valdict)
+# Iterators.enumerate(dict::U2DDict) = enumerate(iterator(dict))
+
+# """ A wrapper for directly constructing a Dict{K,V} with a sizehint 
+# ref. https://discourse.julialang.org/t/proper-way-to-make-an-empty-sizehinted-dict/50962"""
+# struct EmptyDict{K,V} end
+# function EmptyDict{K,V}(n::Integer) where {K,V}
+#     n = Base._tablesz(n)
+#     Dict{K,V}(zeros(UInt8,n), Vector{K}(undef, n), Vector{V}(undef, n), 0, 0, 0, 1, 0)
+# end
+# function populate!(dict::U2DDict{T,K,V,D},constructor_D::Base.Callable) where {T,K,V,D}
+#     for key in keyslots(dict.data)
+#         dict.data[key] = constructor_D()
+#     end
+#     dict
+# end
+# populate!(dict::U2DDict{T,K,V,Dict{T,V}};sizehint_valdict::Int=16) where {T,K,V} = populate!(dict,()->EmptyDict{T,V}(sizehint_valdict))
+
+
+
+
+""
 # """
 #     CyclicPairs{T}
 

@@ -474,6 +474,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
         isused || (v2h[i] = INVALID_ID)
     end
     
+    @exfiltrate
     return IHTopology{N}(h2next,h2v,h2f,v2h,f2h)
 end
 function IHTopology{N}(polys::Vector{F},nv::Int=Int(maximum(maximum,polys)); check_orientability::Bool=true, show_progress::Bool=length(polys)>10^5) where {N,F<:AbstractVector{<:Integer}}

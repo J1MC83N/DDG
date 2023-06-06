@@ -30,7 +30,7 @@ Handle,
 @HandleType,
 @HandleType_alias
 
-abstract type Handle <: Integer end
+abstract type Handle <: Unsigned end
 
 """
     @HandleType(n)
