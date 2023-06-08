@@ -177,7 +177,7 @@ end
 
 using Profile, PProf
 enable_timer!(to)
-IHMesh("test-obj/arrowhead.obj",show_progress=false)
+_mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
 reset_timer!(to)
 @time IHMesh("test-obj/arrowhead.obj",show_progress=false)
 to
@@ -203,6 +203,7 @@ reset_timer!(to)
 @time IHMesh("test-obj/dragon.obj",show_progress=false)
 to
 """
+single core: 
 16.962933 seconds (22.54 M allocations: 5.222 GiB, 4.54% gc time)
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
@@ -218,6 +219,28 @@ to
    fast_obj read                         1    1.19s    7.2%   1.19s     0.00B    0.0%    0.00B
    face connectivity construction        1    278ms    1.7%   278ms    381MiB   14.3%   381MiB
  ─────────────────────────────────────────────────────────────────────────────────────────────
+
+8 threads: 
+14.471110 seconds (75.04 M allocations: 6.452 GiB, 6.14% gc time)
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+                                                     Time                    Allocations      
+                                            ───────────────────────   ────────────────────────
+              Tot / % measured:                  14.5s /  93.8%           6.45GiB /  59.5%    
+
+ Section                            ncalls     time    %tot     avg     alloc    %tot      avg
+ ─────────────────────────────────────────────────────────────────────────────────────────────
+ E2FID construction                      1    6.55s   48.2%   6.55s     0.00B    0.0%    0.00B
+ face orientation                        1    3.96s   29.1%   3.96s   1.61GiB   42.0%  1.61GiB
+ obj read                                1    1.56s   11.5%   1.56s    448MiB   11.4%   448MiB
+   fast_obj read                         1    1.09s    8.0%   1.09s     0.00B    0.0%    0.00B
+   face connectivity construction        1    419ms    3.1%   419ms    381MiB    9.7%   381MiB
+ mesh construction                       1    1.52s   11.2%   1.52s   1.79GiB   46.6%  1.79GiB
+ ─────────────────────────────────────────────────────────────────────────────────────────────
  """
 
+ 
 # @pprof IHMesh("test-obj/dragon.obj",show_progress=false)
+
+
+# _v = zeros(Int,nvertices(_mesh))
+# for ((v1,v2),_) in _E2FID; _v[v1] += 1 end

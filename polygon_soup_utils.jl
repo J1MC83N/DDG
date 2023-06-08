@@ -248,6 +248,131 @@ end
 # capacity(d::IntegerDict) = length(d.values)
 # keyslots(d::IntegerDict{K}) where K = zero(K):K(capacity(d)-1)
 
+const Integer2D{I<:Integer} = Union{NTuple{2,I},AbstractSetwo{I}}
+struct IMDict{N, I<:Integer, K<:Integer2D{I}, V} <: AbstractDict{K,V}
+    sizes::Vector{UInt8}
+    keymat::Matrix{I}
+    valmat::Matrix{V}
+    rest::Dict{K,V}
+    function IMDict{N,I,K,V}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, rest::Dict{K,V}) where {N, I<:Integer, K<:Integer2D{I}, V}
+        @assert 1 <= N <= typemax(UInt8)
+        @assert length(sizes) == size(keymat, 2) == size(valmat, 2)
+        @assert size(keymat, 1) == size(valmat, 1) == N
+        new{N,I,K,V}(sizes, keymat, valmat, rest)
+    end
+    function IMDict{N,I,K,V}(isize::Integer) where {N, I<:Integer, K<:Integer2D{I}, V}
+        @assert 1 <= N <= typemax(UInt8)
+        sizes = zeros(UInt8, isize)
+        # keymat = Matrix{I}(undef, N, isize)
+        keymat = zeros(I, N, isize)
+        # valmat = Matrix{V}(undef, N, isize)
+        valmat = zeros(V, N, isize)
+        rest = Dict{K,V}()
+        new{N,I,K,V}(sizes, keymat, valmat, rest)
+    end
+end
+_isize(dict::IMDict) = length(dict.sizes)
+function IMDict{N}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, rest::Dict{K,V}) where {N, I<:Integer, K<:Integer2D{I}, V}
+    @assert 1 <= N <= typemax(UInt8)
+    @assert length(sizes) == size(keymat, 2) == size(valmat, 2)
+    @assert size(keymat, 1) == size(valmat, 1) == N
+    IMDict{N,I,K,V}(sizes, keymat, valmat, rest)
+end
+
+import Base: getindex, haskey, get, setindex!, length, iterate, isempty
+function col_find_N(::Val{N}, mat::Matrix{T}, maxind::Integer, col::Integer, needle::T) where {N,T}
+    if @generated
+        block = quote
+            @inbounds (index > maxind || mat[index,col] == needle) && return index
+            index += 1
+        end
+        return Expr(:block, :(index = 1), ntuple(_->block, N)...)
+    else
+        for index = 1:maxind
+            mat[index, col] == needle && return index
+        end
+        return maxind+1
+    end
+end
+function mat_keyindex(dict::IMDict{N,I,K},key::K) where {N,I,K}
+    keymat = dict.keymat
+    key1,key2 = key
+    @assert size(keymat,1) == N
+    if key1 > size(keymat,2) 
+        throw(BoundsError("attempt to access $(summary(mat)) at column $col"))
+    end
+    @inbounds colsize = dict.sizes[key1]
+    # assumes key1 in in axes(dict.keymat,2)
+    return col_find_N(Val{N}(), keymat, colsize, key1, key2)
+end
+function haskey(dict::IMDict{N,I,K},key::K) where {N,I,K}
+    key1 = first(key)
+    if key1 <= _isize(dict) # key1 is inbound of matrix
+        index = mat_keyindex(dict,key)
+        if index <= N # key is not in rest Dict; either in matrix or not here at all
+            @inbounds return index <= dict.sizes[key1]
+        end
+    end
+    return haskey(dict.rest, key)
+end
+function getindex(dict::IMDict{N,I,K,V},key::K) where {N,I,K,V}
+    key1 = first(key)
+    if key1 <= _isize(dict) # key1 is inbound of keymat
+        index = mat_keyindex(dict,key)
+        if index <= N # key is not in rest Dict
+            @inbounds if index <= dict.sizes[key1] # key in keymat column 
+                return dict.valmat[index, key1]::V
+            else # keymat column has slots available but key2 not found in it
+                throw(KeyError(key))
+            end
+        end
+    end
+    return dict.rest[key]
+end
+function setindex!(dict::IMDict{N,I,K,V},v::V,key::K) where {N,I,K,V}
+    key1,key2 = key
+    if key1 <= _isize(dict) # key1 is inbound of keymat
+        index = mat_keyindex(dict,key)
+        @inbounds if index <= N # key is not in rest Dict
+            if index > dict.sizes[key1] # key2 not found, column has slots available
+                dict.keymat[index, key1] = key2
+                dict.sizes[key1] += 1
+            end
+            dict.valmat[index, key1] = v
+            return dict
+        end
+    end
+    dict.rest[key] = v
+    return dict
+end
+setindex!(dict::IMDict{N,I,K,V},v0,key::K) where {N,I,K,V} = setindex!(dict,convert(V,v0),key)
+function get(dict::IMDict{N,I,K,V},key::K,default) where {N,I,K,V}
+    key1 = first(key)
+    if key1 <= _isize(dict) # key1 is inbound of keymat
+        index = mat_keyindex(dict,key)
+        if index <= N # key is not in rest Dict
+            @inbounds if index <= dict.sizes[key1] # key in keymat column 
+                return dict.valmat[index, key1]::V
+            else # keymat column has slots available but key2 not found in it
+                return default
+            end
+        end
+    end
+    return get(dict.rest,key,default)
+end
+length(dict::IMDict) = Int(sum(dict.sizes))+length(dict.rest)
+isempty(dict::IMDict) = all(iszero, dict.sizes) && isempty(dict.rest)
+function iterator(dict::IMDict{N,I,K,V}) where {N,I,K,V}
+    sizes,keymat,valmat = dict.sizes, dict.keymat, dict.valmat
+    iter_mat = (K(key1,keymat[ind,key1]) => valmat[ind,key1]
+        for key1 in one(I):I(_isize(dict))
+        for ind in 1:sizes[key1]
+    )
+    return Iterators.flatten((iter_mat,dict.rest))
+end
+Iterators.enumerate(dict::IMDict) = enumerate(iterator(dict))
+
+
 
 # const Unsigned2D{T<:Unsigned} = Union{NTuple{2,T},AbstractSetwo{T}}
 # struct U2DDict{T<:Unsigned,K<:Unsigned2D{T},V,D<:AbstractDict{T,V}} <: AbstractDict{K,V}
