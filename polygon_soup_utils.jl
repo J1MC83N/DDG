@@ -280,83 +280,70 @@ function IMDict{N}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, r
 end
 
 import Base: getindex, haskey, get, setindex!, length, iterate, isempty
-function col_find_N(::Val{N}, mat::Matrix{T}, maxind::Integer, col::Integer, needle::T) where {N,T}
+function col_find_N(::Val{N}, mat::Matrix{I}, maxind::TMI, col::I, needle::I) where {N,TMI<:Integer,I<:Integer}
     if @generated
         block = quote
             @inbounds (index > maxind || mat[index,col] == needle) && return index
-            index += 1
+            index += one(TMI)
         end
-        return Expr(:block, :(index = 1), ntuple(_->block, N)...)
+        return Expr(:block, :(index = one(TMI)), ntuple(_->block, N)...)
     else
-        for index = 1:maxind
+        for index = one(TMI):maxind
             mat[index, col] == needle && return index
         end
-        return maxind+1
+        return maxind+one(TMI)
     end
 end
-function mat_keyindex(dict::IMDict{N,I,K},key::K) where {N,I,K}
+# returns a tuple: (is key inbound of matrix, ifso does key exist, ifso the existing row index else the first available slots)
+function keyindex(dict::IMDict{N,I,K},key::K) where {N,I,K}
     keymat = dict.keymat
     key1,key2 = key
     @assert size(keymat,1) == N
-    if key1 > size(keymat,2) 
-        throw(BoundsError("attempt to access $(summary(mat)) at column $col"))
-    end
+    
+    # key1 is not inbound of matrix
+    key1 > _isize(dict) && return (false, false, 0)
+
     @inbounds colsize = dict.sizes[key1]
-    # assumes key1 in in axes(dict.keymat,2)
-    return col_find_N(Val{N}(), keymat, colsize, key1, key2)
+    index = col_find_N(Val{N}(), keymat, colsize, key1, key2)
+    
+    # key2 cannot exist in keymat column
+    index > N && return (false, false, 0)
+    
+    return (true, index<=colsize, index)
 end
 function haskey(dict::IMDict{N,I,K},key::K) where {N,I,K}
-    key1 = first(key)
-    if key1 <= _isize(dict) # key1 is inbound of matrix
-        index = mat_keyindex(dict,key)
-        if index <= N # key is not in rest Dict; either in matrix or not here at all
-            @inbounds return index <= dict.sizes[key1]
-        end
-    end
+    isinbound,doesexist,_ = keyindex(dict,key)
+    isinbound && return doesexist
     return haskey(dict.rest, key)
 end
 function getindex(dict::IMDict{N,I,K,V},key::K) where {N,I,K,V}
     key1 = first(key)
-    if key1 <= _isize(dict) # key1 is inbound of keymat
-        index = mat_keyindex(dict,key)
-        if index <= N # key is not in rest Dict
-            @inbounds if index <= dict.sizes[key1] # key in keymat column 
-                return dict.valmat[index, key1]::V
-            else # keymat column has slots available but key2 not found in it
-                throw(KeyError(key))
-            end
-        end
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    @inbounds if isinbound
+        return doesexist ? dict.valmat[rowindex, key1]::V : throw(KeyError(key))
     end
     return dict.rest[key]
 end
 function setindex!(dict::IMDict{N,I,K,V},v::V,key::K) where {N,I,K,V}
     key1,key2 = key
-    if key1 <= _isize(dict) # key1 is inbound of keymat
-        index = mat_keyindex(dict,key)
-        @inbounds if index <= N # key is not in rest Dict
-            if index > dict.sizes[key1] # key2 not found, column has slots available
-                dict.keymat[index, key1] = key2
-                dict.sizes[key1] += 1
-            end
-            dict.valmat[index, key1] = v
-            return dict
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    @inbounds if isinbound
+        if !doesexist # making slot
+            dict.keymat[rowindex, key1] = key2
+            dict.sizes[key1] += 1
         end
+        dict.valmat[rowindex, key1] = v
+    else
+        dict.rest[key] = v
     end
-    dict.rest[key] = v
     return dict
 end
 setindex!(dict::IMDict{N,I,K,V},v0,key::K) where {N,I,K,V} = setindex!(dict,convert(V,v0),key)
 function get(dict::IMDict{N,I,K,V},key::K,default) where {N,I,K,V}
     key1 = first(key)
-    if key1 <= _isize(dict) # key1 is inbound of keymat
-        index = mat_keyindex(dict,key)
-        if index <= N # key is not in rest Dict
-            @inbounds if index <= dict.sizes[key1] # key in keymat column 
-                return dict.valmat[index, key1]::V
-            else # keymat column has slots available but key2 not found in it
-                return default
-            end
-        end
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    if isinbound
+        @inbounds return doesexist ? dict.valmat[rowindex, key1]::V : default
     end
     return get(dict.rest,key,default)
 end
@@ -364,9 +351,9 @@ length(dict::IMDict) = Int(sum(dict.sizes))+length(dict.rest)
 isempty(dict::IMDict) = all(iszero, dict.sizes) && isempty(dict.rest)
 function iterator(dict::IMDict{N,I,K,V}) where {N,I,K,V}
     sizes,keymat,valmat = dict.sizes, dict.keymat, dict.valmat
-    iter_mat = (K(key1,keymat[ind,key1]) => valmat[ind,key1]
+    iter_mat = (K(key1,keymat[index,key1]) => valmat[index,key1]::V
         for key1 in one(I):I(_isize(dict))
-        for ind in 1:sizes[key1]
+        for index::Int in 1:sizes[key1]
     )
     return Iterators.flatten((iter_mat,dict.rest))
 end
