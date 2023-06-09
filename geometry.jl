@@ -179,69 +179,72 @@ end
 
 
 
-using Profile, PProf
+using Profile, PProf, BenchmarkTools
+IHMesh("test-obj/arrowhead.obj",show_progress=false)
+display(@benchmark IHMesh("test-obj/arrowhead.obj",show_progress=false))
 enable_timer!(to)
-_mesh = IHMesh("test-obj/arrowhead.obj",check_orientability=false,show_progress=false)
-reset_timer!(to)
-@time IHMesh("test-obj/arrowhead.obj",check_orientability=false,show_progress=false)
+_mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
 to
 
 """
-actual single thread: with IMDict N=5
-0.804248 seconds (1.69 M allocations: 356.498 MiB)
+actual single thread: with IMDict N=6
+BenchmarkTools.Trial: 9 samples with 1 evaluation.
+ Range (min … max):  576.465 ms … 621.762 ms  ┊ GC (min … max): 6.05% … 6.63%
+ Time  (median):     596.140 ms               ┊ GC (median):    5.85%
+ Time  (mean ± σ):   596.640 ms ±  13.816 ms  ┊ GC (mean ± σ):  6.03% ± 0.45%
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
                                             ───────────────────────   ────────────────────────
-              Tot / % measured:                  833ms /  95.6%            358MiB /  59.5%    
+              Tot / % measured:                  90.2s /   0.7%           7.57GiB /   2.9%    
 
  Section                            ncalls     time    %tot     avg     alloc    %tot      avg
  ─────────────────────────────────────────────────────────────────────────────────────────────
- mesh construction                       1    291ms   36.5%   291ms   42.9MiB   20.2%  42.9MiB
- E2FID construction                      1    210ms   26.3%   210ms   12.3MiB    5.8%  12.3MiB
- obj read                                1    155ms   19.5%   155ms   33.6MiB   15.8%  33.6MiB
-   fast_obj read                         1    135ms   16.9%   135ms     0.00B    0.0%    0.00B
-   face connectivity construction        1   16.ms    2.1%  16.ms   28.6MiB   13.4%  28.6MiB
- face orientation                        1    141ms   1.%   141ms    124MiB   58.2%   124MiB
+ face orientation                        1    188ms   30.1%   188ms    124MiB   55.9%   124MiB
+ mesh construction                       1    154ms   24.6%   154ms     0.00B    0.0%    0.00B
+ E2FID construction                      1    144ms   23.0%   144ms   63.9MiB   28.9%  63.9MiB
+ obj read                                1    140ms   22.3%   140ms   33.6MiB   15.2%  33.6MiB
+   fast_obj read                         1    122ms   19.6%   122ms     0.00B    0.0%    0.00B
+   face connectivity construction        1   15.3ms    2.5%  15.3ms   28.6MiB   12.9%  28.6MiB
  ─────────────────────────────────────────────────────────────────────────────────────────────
  """
 reset_timer!(to)
 @time IHMesh("test-obj/dragon.obj",show_progress=false)
 to
 """
-actual single thread: with IMDict N=7
-13.32953 seconds (22.54 M allocations: 4.942 GiB, 6.9% gc time)
+actual single thread: with IMDict N=6
+8.283949 seconds (37.54 M allocations: 4.115 GiB, 8.84% gc time)
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
                                             ───────────────────────   ────────────────────────
-              Tot / % measured:                  13.4s /  98.%           4.94GiB /  55.5%    
+              Tot / % measured:                  8.35s /  91.7%           4.12GiB /  68.5%    
 
  Section                            ncalls     time    %tot     avg     alloc    %tot      avg
  ─────────────────────────────────────────────────────────────────────────────────────────────
- E2FID construction                      1    4.99s   3.8%   4.99s    139MiB    4.9%   139MiB
- mesh construction                       1    4.2s   32.4%   4.2s    52MiB   20.4%   52MiB
- face orientation                        1    2.08s   15.8%   2.08s   1.61GiB   58.8%  1.61GiB
- obj read                                1    1.85s   14.0%   1.85s    448MiB   15.9%   448MiB
-   fast_obj read                         1    1.15s    8.%   1.15s     0.00B    0.0%    0.00B
-   face connectivity construction        1    660ms    5.0%   660ms    381MiB   13.6%   381MiB
+ E2FID construction                      1    2.34s   30.5%   2.34s    790MiB   27.3%   790MiB
+ face orientation                        1    2.12s   27.7%   2.12s   1.61GiB   57.1%  1.61GiB
+ obj read                                1    1.64s   21.4%   1.64s    448MiB   15.5%   448MiB
+   fast_obj read                         1    1.15s   15.0%   1.15s     0.00B    0.0%    0.00B
+   face connectivity construction        1    439ms    5.7%   439ms    381MiB   13.2%   381MiB
+ mesh construction                       1    1.56s   20.4%   1.56s     0.00B    0.0%    0.00B
  ─────────────────────────────────────────────────────────────────────────────────────────────
 
 8 threads: with IMDict N=7
-10.58550 seconds (5.04 M allocations: 6.12 GiB, 4.45% gc time)
- ─────────────────────────────────────────────────────────────────────────────────────────────
-                                                     Time                    Allocations      
-                                            ───────────────────────   ────────────────────────
-              Tot / % measured:                  10.8s /  96.5%           6.1GiB /  64.4%    
+7.693358 seconds (90.04 M allocations: 5.344 GiB, 11.08% gc time)
+─────────────────────────────────────────────────────────────────────────────────────────────
+                                                    Time                    Allocations      
+                                           ───────────────────────   ────────────────────────
+             Tot / % measured:                  7.72s /  89.2%           5.35GiB /  75.8%    
 
- Section                            ncalls     time    %tot     avg     alloc    %tot      avg
- ─────────────────────────────────────────────────────────────────────────────────────────────
- E2FID construction                      1    5.45s   52.4%   5.45s    139MiB    3.4%   139MiB
- face orientation                        1    2.34s   22.5%   2.34s   1.61GiB   40.6%  1.61GiB
- obj read                                1    1.34s   12.9%   1.34s    448MiB   11.0%   448MiB
-   fast_obj read                         1    1.09s   10.5%   1.09s     0.00B    0.0%    0.00B
-   face connectivity construction        1    219ms    2.1%   219ms    381MiB    9.4%   381MiB
- mesh construction                       1    1.26s   12.1%   1.26s   1.9GiB   45.0%  1.9GiB
- ─────────────────────────────────────────────────────────────────────────────────────────────
- """
+Section                            ncalls     time    %tot     avg     alloc    %tot      avg
+─────────────────────────────────────────────────────────────────────────────────────────────
+face orientation                        1    2.29s   33.2%   2.29s   1.61GiB   39.8%  1.61GiB
+E2FID construction                      1    2.07s   30.0%   2.07s    790MiB   19.0%   790MiB
+obj read                                1    1.63s   23.7%   1.63s    448MiB   10.8%   448MiB
+  fast_obj read                         1    1.21s   17.5%   1.21s     0.00B    0.0%    0.00B
+  face connectivity construction        1    378ms    5.5%   378ms    381MiB    9.2%   381MiB
+mesh construction                       1    900ms   13.1%   900ms   1.23GiB   30.3%  1.23GiB
+─────────────────────────────────────────────────────────────────────────────────────────────
+"""
 
  
 # @pprof IHMesh("test-obj/dragon.obj",show_progress=false)
@@ -249,3 +252,6 @@ actual single thread: with IMDict N=7
 
 # _v = zeros(Int,nvertices(_mesh))
 # for ((v1,v2),_) in _E2FID; _v[v1] += 1 end
+
+@profview IHMesh("test-obj/dragon.obj",show_progress=false)
+pprof()

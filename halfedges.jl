@@ -315,7 +315,8 @@ include("polygon_soup_utils.jl")
 # internal type aliases
 const _Edge = VIDSetwo
 const _OEdge = NTuple{2,VID} # an edge with fixed direction/orientation 
-const Type_E2FID = Dictwo{_Edge,FID,FIDSetwo,Dict{_Edge,FID},IMDict{6,VID,_Edge,FIDSetwo}}
+const N_IMDICT = 6
+const Type_E2FID = Dictwo{_Edge,FID,FIDSetwo,Dict{_Edge,FID},IMDict{N_IMDICT,VID,_Edge,FIDSetwo}}
 
 # find the ids of adjecent faces along with the common (oriented) edge
 function adjacent_oedgefids(fid::FID,faces::Vector{F},E2FID::Type_E2FID) where  F<:AbstractVector{VID}
@@ -417,19 +418,22 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     for poly in polys, vid in poly; v2isused[vid] = true; end
     
     ne_approx = sum(length,polys)÷2
-    IE2E = Bijection{Int,_Edge}() # edge associated with edge index
-    sizehint!(IE2E,ne_approx)
-    ie = 1 # edge index pointer
+    IE2E = UnsignedDict{EID,_Edge}(sizehint=ne_approx)
+    E2IE = IMDict{N_IMDICT,VID,VIDSetwo,EID}(nv)
+    ie = EID(0) # edge id
     # FID2F = Bijection{FID,F}() # face associated with face ID
     E2FID = Type_E2FID(nv) # edge associated with one or two faces
     # sizehint!(E2FID,ne_approx)
     
     # construct E2FID
     @timeit to "E2FID construction" for (iface,poly) in enumerate(polys)
-        # @timeit to "FID2F" FID2F[iface] = poly
         for (v1,v2) in cyclic_pairs(poly)
             edge = _Edge(v1,v2)
-            !in(edge,IE2E.range) && (IE2E[ie] = edge; ie += 1)
+            get!(E2IE,edge) do
+                ie::EID += 1
+                IE2E[ie] = edge::_Edge
+                return ie::EID
+            end
             add!(E2FID,edge,iface)
         end
     end
@@ -450,6 +454,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     
     show_progress && println("Constructing mesh...\n", '-'^100)
     @timeit to "mesh construction" @threads_maybe for ie = 1:ne
+        ie = EID(ie)
         show_progress && g(ie,ne,100) && print("#")
         edge = IE2E[ie]
         v1id,v2id = oedge = Tuple(edge)
@@ -467,7 +472,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
         # constructing h2v and v2h
         c1,face1 = FID2C[f1id],polys[f1id]
         _,is_edge_consistent_face1 = search_cycpair(face1,oedge)
-        vids = c1 == is_edge_consistent_face1 ? [v1id,v2id] : [v2id,v1id]
+        vids = c1 == is_edge_consistent_face1 ? (v1id,v2id) : (v2id,v1id)
         for (hid,vid) in zip(hids,vids)
             h2v[hid] = vid
             iszero(v2h[vid]) && (v2h[vid] = hid)
@@ -481,7 +486,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
             iedge_in_face,_ = _search_cycpair(oedges,oedge)
             nextedge = oedges[modoff1(iedge_in_face-(-1)^c,length(face))] |> _Edge
             fids_nextedge = gettwo(E2FID,nextedge,nothing)
-            ih_next = 2*IE2E(nextedge)-1 + (isnothing(fids_nextedge) ? 0 : islast(fid,fids_nextedge))
+            ih_next = 2*E2IE[nextedge]-1 + (isnothing(fids_nextedge) ? 0 : islast(fid,fids_nextedge))
             h2next[hid] = ih_next
         end
         # working towads h2next for boundary halfedge

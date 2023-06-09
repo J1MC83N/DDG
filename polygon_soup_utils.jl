@@ -105,7 +105,7 @@ function IMDict{N}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, r
     IMDict{N,I,K,V}(sizes, keymat, valmat, rest)
 end
 
-import Base: getindex, haskey, get, setindex!, length, isempty, iterate
+import Base: getindex, haskey, get, setindex!, length, isempty, iterate, get!
 function col_find_N(::Val{N}, mat::Matrix{I}, maxind::TMI, col::I, needle::I) where {N,TMI<:Integer,I<:Integer}
     if @generated
         block = quote
@@ -173,6 +173,32 @@ function setindex!(dict::IMDict{N,I,K,V},v::V,key::K) where {N,I,K,V}
     return dict
 end
 setindex!(dict::IMDict{N,I,K,V},v0,key::K) where {N,I,K,V} = setindex!(dict,convert(V,v0),key)
+function get!(dict::IMDict{N,I,K,V},key::K,default::V) where {N,I,K,V}
+    key1,key2 = key
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    @inbounds if isinbound
+        doesexist && return dict.valmat[rowindex, key1]
+        # making slot, setting value to default
+        dict.keymat[rowindex, key1] = key2
+        dict.sizes[key1] += 1
+        return dict.valmat[rowindex, key1] = default
+    end
+    return get!(dict.rest,key,default)
+end
+get!(dict::IMDict{N,I,K,V},key::K,default) where {N,I,K,V} = get!(dict,key,convert(V,default))
+function get!(f::Base.Callable,dict::IMDict{N,I,K,V},key::K) where {N,I,K,V}
+    key1,key2 = key
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    @inbounds if isinbound
+        doesexist && return dict.valmat[rowindex, key1]
+        # making slot, setting value to default
+        dict.keymat[rowindex, key1] = key2
+        dict.sizes[key1] += 1
+        return dict.valmat[rowindex, key1] = convert(V,f())
+    end
+    return get!(f,dict.rest,key)
+end
+
 
 length(dict::IMDict) = Int(sum(dict.sizes))+length(dict.rest)
 isempty(dict::IMDict) = all(iszero, dict.sizes) && isempty(dict.rest)
@@ -305,87 +331,87 @@ end
 #     end
 # end
 
-# using DataStructures: IntSet, findnextidx
-# """
-#     struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
+using DataStructures: IntSet, findnextidx
+"""
+    struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
 
-# Thin wrapper around `IntSet` from DataStructures that supports arbitrary Unsigned integer types. 
-# """
-# struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
-#     data::IntSet
-#     UnsignedSet{T}(data::IntSet) where T<:Unsigned = new{T}(data)
-# end
-# UnsignedSet{T}(itr) where T = UnsignedSet{T}(IntSet(itr))
-# UnsignedSet{T}() where T = UnsignedSet{T}(IntSet())
+Thin wrapper around `IntSet` from DataStructures that supports arbitrary Unsigned integer types. 
+"""
+struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
+    data::IntSet
+    UnsignedSet{T}(data::IntSet) where T<:Unsigned = new{T}(data)
+end
+UnsignedSet{T}(itr) where T = UnsignedSet{T}(IntSet(itr))
+UnsignedSet{T}() where T = UnsignedSet{T}(IntSet())
 
-# import Base: first, last, iterate, length, in, sizehint!, empty!, delete!, push!
-# first(s::UnsignedSet{T}) where T = T(first(s.data))
-# last(s::UnsignedSet{T}) where T = T(last(s.data))
-# function iterate(s::UnsignedSet{T}) where T
-#     it = iterate(s.data)
-#     isnothing(it) && return nothing
-#     val,state = it
-#     return T(val),state
-# end
-# function iterate(s::UnsignedSet{T},state) where T
-#     it = iterate(s.data,state)
-#     isnothing(it) && return nothing
-#     val,state = it
-#     return T(val),state
-# end
-# length(s::UnsignedSet) = length(s.data)
-# in(val::Integer,s::UnsignedSet) = val in s.data
-# sizehint!(s::UnsignedSet, n::Integer) = (sizehint!(s.data, n); s)
-# empty!(s::UnsignedSet) = (empty!(s.data); s)
-# delete!(s::UnsignedSet, n::Integer) = (delete!(s.data, n); s)
-# push!(s::UnsignedSet, n::Integer) = (push!(s.data, n); s)
-# push!(s::IntSet, ns::Integer...) = (push!(s.data, ns...); s)
-# findnextelem(s::IntSet, i::Int, invert::Bool=false) = findnextidx(s,i+1,invert)-1
-# findnextelem(s::UnsignedSet{T}, i::Int, invert::Bool=false) where T = T(findnextelem(s,i,invert))
+import Base: first, last, iterate, length, in, sizehint!, empty!, delete!, push!
+first(s::UnsignedSet{T}) where T = T(first(s.data))
+last(s::UnsignedSet{T}) where T = T(last(s.data))
+function iterate(s::UnsignedSet{T}) where T
+    it = iterate(s.data)
+    isnothing(it) && return nothing
+    val,state = it
+    return T(val),state
+end
+function iterate(s::UnsignedSet{T},state) where T
+    it = iterate(s.data,state)
+    isnothing(it) && return nothing
+    val,state = it
+    return T(val),state
+end
+length(s::UnsignedSet) = length(s.data)
+in(val::Integer,s::UnsignedSet) = val in s.data
+sizehint!(s::UnsignedSet, n::Integer) = (sizehint!(s.data, n); s)
+empty!(s::UnsignedSet) = (empty!(s.data); s)
+delete!(s::UnsignedSet, n::Integer) = (delete!(s.data, n); s)
+push!(s::UnsignedSet, n::Integer) = (push!(s.data, n); s)
+push!(s::IntSet, ns::Integer...) = (push!(s.data, ns...); s)
+findnextelem(s::IntSet, i::Int, invert::Bool=false) = findnextidx(s,i+1,invert)-1
+findnextelem(s::UnsignedSet{T}, i::Int, invert::Bool=false) where T = T(findnextelem(s,i,invert))
 
 
-# struct IntegerDict{K<:Unsigned,V} <: AbstractDict{K,V}
-#     keys::UnsignedSet
-#     values::Vector{V}
-#     function IntegerDict{K,V}(;sizehint::Int=64) where {K<:Unsigned,V}
-#         keys = sizehint!(UnsignedSet{K}(),sizehint)
-#         values = Vector{V}(undef,sizehint)
-#         new{K,V}(keys,values)
-#     end
-# end
+struct UnsignedDict{K<:Unsigned,V} <: AbstractDict{K,V}
+    keys::UnsignedSet
+    values::Vector{V}
+    function UnsignedDict{K,V}(;sizehint::Int=64) where {K<:Unsigned,V}
+        keys = sizehint!(UnsignedSet{K}(),sizehint)
+        values = Vector{V}(undef,sizehint)
+        new{K,V}(keys,values)
+    end
+end
 
-# import Base: getindex, haskey, keys, get, setindex!, length, iterate, isempty
-# keys(d::IntegerDict) = d.keys
-# haskey(d::IntegerDict, key::Integer) = key in keys(d)
-# length(d::IntegerDict) = length(keys(d))
-# getindex(d::IntegerDict{K,V}, key::Integer) where {K,V} = @inbounds !haskey(d,key) ? throw(KeyError(key)) : d.values[key+1]::V
-# function setindex!(d::IntegerDict{K,V}, v::V, key::Integer) where {K,V}
-#     keys,values = d.keys,d.values
-#     if key > length(values)-1
-#         newlen = 1 + key + key>>1
-#         resize!(values, newlen)
-#     end
-#     push!(keys, key)
-#     @inbounds values[key+1] = v
-#     return d
-# end
-# setindex!(d::IntegerDict{K,V}, v0, key::Integer) where {K,V} = setindex!(d,convert(V,v0),key)
-# get(d::IntegerDict{K,V}, key::Integer, default) where {K,V} = haskey(d,key) ? d[key]::V : default
-# isempty(d::IntegerDict) = isempty(keys(d))
-# function iterate(d::IntegerDict)
-#     isempty(d) && return nothing
-#     i,state_keys = iterate(keys(d))
-#     return (i => d[i], state_keys)
-# end
-# function iterate(d::IntegerDict, state_keys)
-#     next = iterate(keys(d),state_keys)
-#     isnothing(next) && return nothing
-#     i,state_keys = next
-#     return (i => d[i], state_keys)
-# end
-# import DataStructures: capacity
-# capacity(d::IntegerDict) = length(d.values)
-# keyslots(d::IntegerDict{K}) where K = zero(K):K(capacity(d)-1)
+import Base: getindex, haskey, keys, get, setindex!, length, iterate, isempty
+keys(d::UnsignedDict) = d.keys
+haskey(d::UnsignedDict, key::Integer) = key in keys(d)
+length(d::UnsignedDict) = length(keys(d))
+getindex(d::UnsignedDict{K,V}, key::Integer) where {K,V} = @inbounds !haskey(d,key) ? throw(KeyError(key)) : d.values[key+1]::V
+function setindex!(d::UnsignedDict{K,V}, v::V, key::Integer) where {K,V}
+    keys,values = d.keys,d.values
+    if key > length(values)-1
+        newlen = 1 + key + key>>1
+        resize!(values, newlen)
+    end
+    push!(keys, key)
+    @inbounds values[key+1] = v
+    return d
+end
+setindex!(d::UnsignedDict{K,V}, v0, key::Integer) where {K,V} = setindex!(d,convert(V,v0),key)
+get(d::UnsignedDict{K,V}, key::Integer, default) where {K,V} = haskey(d,key) ? d[key]::V : default
+isempty(d::UnsignedDict) = isempty(keys(d))
+function iterate(d::UnsignedDict)
+    isempty(d) && return nothing
+    i,state_keys = iterate(keys(d))
+    return (i => d[i], state_keys)
+end
+function iterate(d::UnsignedDict, state_keys)
+    next = iterate(keys(d),state_keys)
+    isnothing(next) && return nothing
+    i,state_keys = next
+    return (i => d[i], state_keys)
+end
+import DataStructures: capacity
+capacity(d::UnsignedDict) = length(d.values)
+keyslots(d::UnsignedDict{K}) where K = zero(K):K(capacity(d)-1)
 
 
 
