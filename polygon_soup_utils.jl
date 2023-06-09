@@ -2,7 +2,7 @@
 """
     AbstractSetwo{T} <: AbstractSet{T}
 
-An abstract type that represent a set of two elements; subtypes are a generic Setwo and a Handle-specialized HandleSetwo.
+An abstract type that represents a set of two elements; subtypes are a generic Setwo and a Handle-specialized HandleSetwo.
 """
 abstract type AbstractSetwo{T} <: AbstractSet{T} end
 
@@ -66,23 +66,159 @@ else
     hash(s::HandleSetwo{T},h::UInt) where T = hash(first(s),hash(last(s),h))
 end
 
-"""
-    Dictwo{K,V,S<:AbstractSetwo{V}} <: AbstractDict{K,Union{V,S}}
 
-A dictionary type that stores one or two values for each key. Implemented with two dicts, one for single values and the other for two values.
+const Integer2D{I<:Integer} = Union{NTuple{2,I},AbstractSetwo{I}}
 """
-struct Dictwo{K,V,S<:AbstractSetwo{V}} <: AbstractDict{K,Union{V,S}}
-    K21V::Dict{K,V}
-    K22V::Dict{K,S}
-    function Dictwo{K,V,S}() where {K,V,S<:AbstractSetwo{V}}
-        new(Dict{K,V}(),Dict{K,S}())
+    IMDict{N, I<:Integer, K<:Integer2D{I}, V} <: AbstractDict{K,V}
+
+A dictionary datatype optimized for 2D integer-type keys that is dense in the first key dimension. Most entries are stored in a key matrix `keymat` and an value matrix `valmat`. Each such entry, `(key1, key2) => val`, has `key2` stored in `keymat[index,key1]` and `val` stored `valmat[index,key1]` where `1<=index<=N` is arbitrary. Both matrices are `N`*`isize`, where N is the maximum number of entries in the matrix with the same `key1`, and `1:U`` is range of `key1`` stored that the matrices store. Therefore, both matrices taken together, each column corresponds to a single `key1`, their entries are pairs of `key2` and `val`. The `sizes` field stores each column's usage and is indexed `1:isize`` accordingly.
+
+The `rest` field is a Dict that stores all other entries that doesn't fit into the matrix, either because `key1 ∉ 1:isize` or the `key1`'s column is full with `N` existing entries. 
+"""
+struct IMDict{N, I<:Integer, K<:Integer2D{I}, V} <: AbstractDict{K,V}
+    sizes::Vector{UInt8}
+    keymat::Matrix{I}
+    valmat::Matrix{V}
+    rest::Dict{K,V}
+    function IMDict{N,I,K,V}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, rest::Dict{K,V}) where {N, I<:Integer, K<:Integer2D{I}, V}
+        @assert 1 <= N <= typemax(UInt8)
+        @assert length(sizes) == size(keymat, 2) == size(valmat, 2)
+        @assert size(keymat, 1) == size(valmat, 1) == N
+        new{N,I,K,V}(sizes, keymat, valmat, rest)
     end
-    function Dictwo{K,V,S}(K21V::Dict{K,V},K22V::Dict{K,S}) where {K,V,S<:AbstractSetwo{V}}
-        @assert isempty(intersect(keys(K21V),keys(K22V)))
-        new{K,V,S}(K21V,K22V)
+    function IMDict{N,I,K,V}(isize::Integer) where {N, I<:Integer, K<:Integer2D{I}, V}
+        @assert 1 <= N <= typemax(UInt8)
+        sizes = zeros(UInt8, isize)
+        keymat = Matrix{I}(undef, N, isize)
+        # keymat = zeros(I, N, isize)
+        valmat = Matrix{V}(undef, N, isize)
+        # valmat = zeros(V, N, isize)
+        rest = Dict{K,V}()
+        new{N,I,K,V}(sizes, keymat, valmat, rest)
     end
 end
-Dictwo(K21V::Dict{K,V},K22V::Dict{K,S}) where {K,V,S<:AbstractSetwo{V}} = Dictwo{K,V,S}(K21V,K22V)
+_isize(dict::IMDict) = length(dict.sizes)
+function IMDict{N}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, rest::Dict{K,V}) where {N, I<:Integer, K<:Integer2D{I}, V}
+    @assert 1 <= N <= typemax(UInt8)
+    @assert length(sizes) == size(keymat, 2) == size(valmat, 2)
+    @assert size(keymat, 1) == size(valmat, 1) == N
+    IMDict{N,I,K,V}(sizes, keymat, valmat, rest)
+end
+
+import Base: getindex, haskey, get, setindex!, length, isempty, iterate
+function col_find_N(::Val{N}, mat::Matrix{I}, maxind::TMI, col::I, needle::I) where {N,TMI<:Integer,I<:Integer}
+    if @generated
+        block = quote
+            @inbounds (index > maxind || mat[index,col] == needle) && return index
+            index += one(TMI)
+        end
+        return Expr(:block, :(index = one(TMI)), ntuple(_->block, N)...)
+    else
+        for index = one(TMI):maxind
+            mat[index, col] == needle && return index
+        end
+        return maxind+one(TMI)
+    end
+end
+# returns a tuple: (is key inbound of matrix, ifso does key exist, ifso the existing row index else the first available slots)
+function keyindex(dict::IMDict{N,I,K},key::K) where {N,I,K}
+    keymat = dict.keymat
+    key1,key2 = key
+    @assert size(keymat,1) == N
+    
+    # key1 is not inbound of matrix
+    key1 > _isize(dict) && return (false, false, 0)
+
+    @inbounds colsize = dict.sizes[key1]
+    index = col_find_N(Val{N}(), keymat, colsize, key1, key2)
+    
+    # key2 cannot exist in keymat column
+    index > N && return (false, false, 0)
+    
+    return (true, index<=colsize, index)
+end
+function haskey(dict::IMDict{N,I,K},key::K) where {N,I,K}
+    isinbound,doesexist,_ = keyindex(dict,key)
+    isinbound && return doesexist
+    return haskey(dict.rest, key)
+end
+function getindex(dict::IMDict{N,I,K,V},key::K) where {N,I,K,V}
+    key1 = first(key)
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    @inbounds if isinbound
+        return doesexist ? dict.valmat[rowindex, key1]::V : throw(KeyError(key))
+    end
+    return dict.rest[key]
+end
+function get(dict::IMDict{N,I,K,V},key::K,default) where {N,I,K,V}
+    key1 = first(key)
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    if isinbound
+        @inbounds return doesexist ? dict.valmat[rowindex, key1]::V : default
+    end
+    return get(dict.rest,key,default)
+end
+function setindex!(dict::IMDict{N,I,K,V},v::V,key::K) where {N,I,K,V}
+    key1,key2 = key
+    isinbound,doesexist,rowindex = keyindex(dict,key)
+    @inbounds if isinbound
+        if !doesexist # making slot
+            dict.keymat[rowindex, key1] = key2
+            dict.sizes[key1] += 1
+        end
+        dict.valmat[rowindex, key1] = v
+    else
+        dict.rest[key] = v
+    end
+    return dict
+end
+setindex!(dict::IMDict{N,I,K,V},v0,key::K) where {N,I,K,V} = setindex!(dict,convert(V,v0),key)
+
+length(dict::IMDict) = Int(sum(dict.sizes))+length(dict.rest)
+isempty(dict::IMDict) = all(iszero, dict.sizes) && isempty(dict.rest)
+function iterator(dict::IMDict{N,I,K,V}) where {N,I,K,V}
+    sizes,keymat,valmat = dict.sizes, dict.keymat, dict.valmat
+    iter_mat = (K(key1,keymat[index,key1]) => valmat[index,key1]::V
+        for key1 in one(I):I(_isize(dict))
+        for index::Int in 1:sizes[key1]
+    )
+    return Iterators.flatten((iter_mat,dict.rest))
+end
+Iterators.enumerate(dict::IMDict) = enumerate(iterator(dict))
+iterate(dict::IMDict) = iterate(iterator(dict))
+iterate(dict::IMDict,state) = iterate(iterator(dict),state)
+
+""" A wrapper for directly constructing a Dict{K,V} with a sizehint 
+ref. https://discourse.julialang.org/t/proper-way-to-make-an-empty-sizehinted-dict/50962"""
+struct EmptyDict{K,V} end
+function EmptyDict{K,V}(n::Integer) where {K,V}
+    n = Base._tablesz(n)
+    Dict{K,V}(zeros(UInt8,n), Vector{K}(undef, n), Vector{V}(undef, n), 0, 0, 0, 1, 0)
+end
+
+
+init_dict_sizehint(::Type{Dict{K,V}}) where {K,V} = EmptyDict{K,V}
+init_dict_sizehint(::Type{IMDict{N,I,K,V}}) where {N,I,K,V} = IMDict{N,I,K,V}
+"""
+    Dictwo{K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}} <: AbstractDict{K,Union{V,S}}
+
+A dictionary type that stores one or two values for each key. Implemented with two dictionaries, one for single values and the other for two values. A key cannot exist in both dictionaries at once. 
+"""
+struct Dictwo{K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}} <: AbstractDict{K,Union{V,S}}
+    K21V::DV
+    K22V::DS
+    function Dictwo{K,V,S,DV,DS}(sizehint::Integer=64) where {K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}}
+        new{K,V,S,DV,DS}(init_dict_sizehint(DV)(sizehint),init_dict_sizehint(DS)(sizehint))
+    end
+    function Dictwo{K,V,S,DV,DS}(K21V::Dict{K,V},K22V::Dict{K,S}) where {K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}}
+        @assert isempty(intersect(keys(K21V),keys(K22V)))
+        new{K,V,S,DV,DS}(K21V,K22V)
+    end
+end
+Dictwo(K21V::DV,K22V::DS) where {K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}} = Dictwo{K,V,S,DV,DS}(K21V,K22V)
+Dictwo{K,V,S}(::Type{_D}, sizehint::Integer=64) where {K,V,S<:AbstractSetwo{V},_D<:AbstractDict} = Dictwo{K,V,_S{V},_D{K,V},_D{K,S}}(sizehint)
+Dictwo{K,V}(::Type{_S},::Type{_D}, sizehint::Integer=64) where {K,V,_S<:AbstractSetwo,_D<:AbstractDict} = Dictwo{K,V,_S{V},_D{K,V},_D{K,_S{V}}}(sizehint)
+const IMDictwo{N,I,K,V,S} = Dictwo{K,V,S,IMDict{N,I,K,V},IMDict{N,I,K,S}}
 
 import Base: getindex, haskey, get, setindex!, length, iterate, sizehint!
 getdicts(d::Dictwo) = (d.K21V,d.K22V)
@@ -118,8 +254,7 @@ function setindex!(d::Dictwo{K,V,<:Any},v0,key::K) where {K,V}
     setindex!(K21V,v,key)
     d
 end
-sizehint!(d::Dictwo,n::Integer) = (sizehint!(d.K21V,n); sizehint!(d.K22V,n); d)
-
+# sizehint!(d::Dictwo,n::Integer) = (sizehint!(d.K21V,n); sizehint!(d.K22V,n); d)
 """
     add!(d::Dictwo, key, v)
 
@@ -128,9 +263,13 @@ Add a key=>value pair to a Dictwo. If the key is already associated with another
 function add!(d::Dictwo{K,V,S},key::K,v) where {K,V,S<:AbstractSetwo{V}}
     haskey(d.K22V,key) && error("Dictwo already has two values associated key $key")
     v1 = get(d.K21V,key,nothing)
+    
+    # @infiltrate key == VIDSetwo(1,4)
     if isnothing(v1) # new key; adding to K21V
+        # println(" new key")
         d.K21V[key] = v
     else # already one value associated with key; moving to K22V
+        # println(" already one")
         d.K22V[key] = S(v1,v)
         delete!(d.K21V,key)
     end
@@ -157,14 +296,14 @@ end
 
 # define type alias for Dictwo with a Handle type as value type
 # i.e. HIDDictwo{K} => Dictwo{K,HID,HIDSetwo}
-if !isdefined(Main,:Handle)
-    @warn "Handle type are undefined; skipping definitions of Dictwo aliases involving Handles"
-else
-    const HandleDictwo{K,H} = Dictwo{K,H,HandleSetwo{H}} where H<:Handle
-    for (tname,alias) in _Handle2Alias
-        @eval const $(Symbol(alias,"Dictwo")){K} = HandleDictwo{K,$tname} where K
-    end
-end
+# if !isdefined(Main,:Handle)
+#     @warn "Handle type are undefined; skipping definitions of Dictwo aliases involving Handles"
+# else
+#     const HandleDictwo{K,H} = Dictwo{K,H,HandleSetwo{H}} where H<:Handle
+#     for (tname,alias) in _Handle2Alias
+#         @eval const $(Symbol("Dictwo",alias)){K} = HandleDictwo{K,$tname} where K
+#     end
+# end
 
 # using DataStructures: IntSet, findnextidx
 # """
@@ -248,116 +387,6 @@ end
 # capacity(d::IntegerDict) = length(d.values)
 # keyslots(d::IntegerDict{K}) where K = zero(K):K(capacity(d)-1)
 
-const Integer2D{I<:Integer} = Union{NTuple{2,I},AbstractSetwo{I}}
-struct IMDict{N, I<:Integer, K<:Integer2D{I}, V} <: AbstractDict{K,V}
-    sizes::Vector{UInt8}
-    keymat::Matrix{I}
-    valmat::Matrix{V}
-    rest::Dict{K,V}
-    function IMDict{N,I,K,V}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, rest::Dict{K,V}) where {N, I<:Integer, K<:Integer2D{I}, V}
-        @assert 1 <= N <= typemax(UInt8)
-        @assert length(sizes) == size(keymat, 2) == size(valmat, 2)
-        @assert size(keymat, 1) == size(valmat, 1) == N
-        new{N,I,K,V}(sizes, keymat, valmat, rest)
-    end
-    function IMDict{N,I,K,V}(isize::Integer) where {N, I<:Integer, K<:Integer2D{I}, V}
-        @assert 1 <= N <= typemax(UInt8)
-        sizes = zeros(UInt8, isize)
-        # keymat = Matrix{I}(undef, N, isize)
-        keymat = zeros(I, N, isize)
-        # valmat = Matrix{V}(undef, N, isize)
-        valmat = zeros(V, N, isize)
-        rest = Dict{K,V}()
-        new{N,I,K,V}(sizes, keymat, valmat, rest)
-    end
-end
-_isize(dict::IMDict) = length(dict.sizes)
-function IMDict{N}(sizes::Vector{UInt8}, keymat::Matrix{I}, valmat::Matrix{V}, rest::Dict{K,V}) where {N, I<:Integer, K<:Integer2D{I}, V}
-    @assert 1 <= N <= typemax(UInt8)
-    @assert length(sizes) == size(keymat, 2) == size(valmat, 2)
-    @assert size(keymat, 1) == size(valmat, 1) == N
-    IMDict{N,I,K,V}(sizes, keymat, valmat, rest)
-end
-
-import Base: getindex, haskey, get, setindex!, length, iterate, isempty
-function col_find_N(::Val{N}, mat::Matrix{I}, maxind::TMI, col::I, needle::I) where {N,TMI<:Integer,I<:Integer}
-    if @generated
-        block = quote
-            @inbounds (index > maxind || mat[index,col] == needle) && return index
-            index += one(TMI)
-        end
-        return Expr(:block, :(index = one(TMI)), ntuple(_->block, N)...)
-    else
-        for index = one(TMI):maxind
-            mat[index, col] == needle && return index
-        end
-        return maxind+one(TMI)
-    end
-end
-# returns a tuple: (is key inbound of matrix, ifso does key exist, ifso the existing row index else the first available slots)
-function keyindex(dict::IMDict{N,I,K},key::K) where {N,I,K}
-    keymat = dict.keymat
-    key1,key2 = key
-    @assert size(keymat,1) == N
-    
-    # key1 is not inbound of matrix
-    key1 > _isize(dict) && return (false, false, 0)
-
-    @inbounds colsize = dict.sizes[key1]
-    index = col_find_N(Val{N}(), keymat, colsize, key1, key2)
-    
-    # key2 cannot exist in keymat column
-    index > N && return (false, false, 0)
-    
-    return (true, index<=colsize, index)
-end
-function haskey(dict::IMDict{N,I,K},key::K) where {N,I,K}
-    isinbound,doesexist,_ = keyindex(dict,key)
-    isinbound && return doesexist
-    return haskey(dict.rest, key)
-end
-function getindex(dict::IMDict{N,I,K,V},key::K) where {N,I,K,V}
-    key1 = first(key)
-    isinbound,doesexist,rowindex = keyindex(dict,key)
-    @inbounds if isinbound
-        return doesexist ? dict.valmat[rowindex, key1]::V : throw(KeyError(key))
-    end
-    return dict.rest[key]
-end
-function setindex!(dict::IMDict{N,I,K,V},v::V,key::K) where {N,I,K,V}
-    key1,key2 = key
-    isinbound,doesexist,rowindex = keyindex(dict,key)
-    @inbounds if isinbound
-        if !doesexist # making slot
-            dict.keymat[rowindex, key1] = key2
-            dict.sizes[key1] += 1
-        end
-        dict.valmat[rowindex, key1] = v
-    else
-        dict.rest[key] = v
-    end
-    return dict
-end
-setindex!(dict::IMDict{N,I,K,V},v0,key::K) where {N,I,K,V} = setindex!(dict,convert(V,v0),key)
-function get(dict::IMDict{N,I,K,V},key::K,default) where {N,I,K,V}
-    key1 = first(key)
-    isinbound,doesexist,rowindex = keyindex(dict,key)
-    if isinbound
-        @inbounds return doesexist ? dict.valmat[rowindex, key1]::V : default
-    end
-    return get(dict.rest,key,default)
-end
-length(dict::IMDict) = Int(sum(dict.sizes))+length(dict.rest)
-isempty(dict::IMDict) = all(iszero, dict.sizes) && isempty(dict.rest)
-function iterator(dict::IMDict{N,I,K,V}) where {N,I,K,V}
-    sizes,keymat,valmat = dict.sizes, dict.keymat, dict.valmat
-    iter_mat = (K(key1,keymat[index,key1]) => valmat[index,key1]::V
-        for key1 in one(I):I(_isize(dict))
-        for index::Int in 1:sizes[key1]
-    )
-    return Iterators.flatten((iter_mat,dict.rest))
-end
-Iterators.enumerate(dict::IMDict) = enumerate(iterator(dict))
 
 
 
@@ -390,13 +419,6 @@ Iterators.enumerate(dict::IMDict) = enumerate(iterator(dict))
 # iterator(dict::U2DDict{T,K,V,D}) where {T,K,V,D} = (K(key1,key2)=>val for (key1::T,valdict::D) in dict.data for (key2::T,val::V) in valdict)
 # Iterators.enumerate(dict::U2DDict) = enumerate(iterator(dict))
 
-# """ A wrapper for directly constructing a Dict{K,V} with a sizehint 
-# ref. https://discourse.julialang.org/t/proper-way-to-make-an-empty-sizehinted-dict/50962"""
-# struct EmptyDict{K,V} end
-# function EmptyDict{K,V}(n::Integer) where {K,V}
-#     n = Base._tablesz(n)
-#     Dict{K,V}(zeros(UInt8,n), Vector{K}(undef, n), Vector{V}(undef, n), 0, 0, 0, 1, 0)
-# end
 # function populate!(dict::U2DDict{T,K,V,D},constructor_D::Base.Callable) where {T,K,V,D}
 #     for key in keyslots(dict.data)
 #         dict.data[key] = constructor_D()
