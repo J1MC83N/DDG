@@ -67,33 +67,47 @@ struct ImplicitHalfEdgeTopology{N} <: Topology
 end
 const IHTopology = ImplicitHalfEdgeTopology
 
-const ø = nothing
+"""
+Relationship between edge handle and halfedge handle:
+HID: [1,2,3,4,5,6,7,8]
+EID: [⌞1⌟,⌞2⌟,⌞3⌟,⌞4⌟]
+"""
+EID
 
 import Meshes: paramdim, nvertices, nfaces, nfacets, nelements
 paramdim(::IHTopology) = 2
 nvertices(topo::IHTopology) = length(topo.v2h)
 nhalfedges(topo::IHTopology) = length(topo.h2next)
-nfacets(topo::IHTopology) = nhalfedges(topo)÷2
+nedges(topo::IHTopology) = nhalfedges(topo)÷2
+nfacets(topo::IHTopology) = nedges(topo)
 nfaces(topo::IHTopology) = nfaces(topo,2)
 nelements(topo::IHTopology) = length(topo.f2h)
 nhvf(topo::IHTopology) = (nhalfedges(topo),nvertices(topo),nfaces(topo))
 
 vertexids(topo::IHTopology) = VID(1):VID(nvertices(topo))
 halfedgeids(topo::IHTopology) = HID(1):HID(nhalfedges(topo))
+edgeids(topo::IHTopology) = EID(1):EID(nedges(topo))
 faceids(topo::IHTopology) = FID(1):FID(nfaces(topo))
 
 # convenience methods for getting around an IHTopology, also improve code readability
 next(topo::IHTopology,hid::HID) = topo.h2next[hid]
-hidtwin(id::HID) = HID(((id-1)⊻1)+1)
-twin(::IHTopology,hid::HID) = hidtwin(hid)
+_twin(id::HID) = HID(((id-1)⊻1)+1)
+twin(::IHTopology,hid::HID) = _twin(hid)
 prev(topo::IHTopology,hid::HID) = findfirst(==(hid),topo.h2next)
 vertex(topo::IHTopology,hid::HID) = topo.h2v[hid]
 headvertex(topo::IHTopology,hid::HID) = vertex(topo,next(topo,hid))
 face(topo::IHTopology,hid::HID) = topo.h2f[hid]
 halfedge(topo::IHTopology,vid::VID) = topo.v2h[vid]
+_halfedge(eid::EID) = HID(2eid-1)
+halfedge(::IHTopology,eid::EID) = _halfedge(eid)
 halfedge(topo::IHTopology,fid::FID) = topo.f2h[fid]
-# the id of a corner is that of the the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
-@inline halfedge(::IHTopology,cid::CID) = HID(cid)
+_edge(hid::HID) = EID((hid+1)÷2)
+edge(::IHTopology,hid::HID) = _edge(hid)
+edge(topo::IHTopology,vid::VID) = edge(topo,halfedge(topo,vid))
+edge(topo::IHTopology,fid::FID) = edge(topo,halfedge(topo,fid))
+
+# the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
+halfedge(::IHTopology,cid::CID) = HID(cid)
 next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
 vertex(topo::IHTopology,cid::CID) = headvertex(topo,HID(cid))
 face(topo::IHTopology,cid::CID) = face(topo,HID(cid))
@@ -104,13 +118,12 @@ unsafe_opp_halfedge(topo::IHTopology{3},c::CID) = next(topo,next(topo,HID(c)))
 opp_halfedge(topo::IHTopology{3},c::CID) = (@assert !isnothing(face(topo,c)); unsafe_opp_corner(topo,c))
 
 # define partial applications
-const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face])
+const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :edge])
 for f in _PARTIAL_METHODS
     @eval $(Symbol(:∂,f))(topo::IHTopology) = obj -> $f(topo, obj)
 end
 
-const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge])
-addtofix1!(fs::Function...) = push!(_FIX1_METHODS,Symbol.(fs)...)
+
 """
     @fix1 fixed_arg expr
 
@@ -122,7 +135,7 @@ Also supports chaining: `@fix1 topo h |> next |> face` is equivalent to `face(to
 macro fix1(fixed,ex)
     _fix1(fixed,ex)
 end
-function _fix1(fixed::Symbol,ex::Expr)
+function _fix1(fixed,ex::Expr)
     if ex.head === :call
         fun = ex.args[1]
         if fun in _FIX1_METHODS
@@ -139,12 +152,29 @@ function _fix1(fixed::Symbol,ex::Expr)
         ex
     end
 end
-# _fix1(fixed,ex::Symbol) = (@show 2,fixed,ex; esc(ex))
-# _fix1(fixed,ex) = (@show 3,fixed,ex; ecs(ex))
-_fix1(fixed::Symbol,ex) = esc(ex)
+_fix1(fixed,ex) = esc(ex)
+
+const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge, :edge])
+_addtofix1!(fs::Union{Function,Symbol}...) = push!(_FIX1_METHODS,Symbol.(fs)...)
+
+using MyMacros
+macro fix1able(fname::Symbol)
+    quote
+        _addtofix1!($(Meta.quot(fname)))
+    end |> esc
+end
+macro fix1able(f)
+    @assert isa(f, Expr) && (f.head === :function || Base.is_short_function_def(f))
+    fname = MyMacros.fname(f)
+    quote
+        _addtofix1!($(Meta.quot(fname)))
+        $f
+    end |> esc
+end
+
 
 cut_vector_typeinfo(str::AbstractString) = replace(str,r"^[\w\{\}, ]+\["=>"[")
-    
+
 function Base.show(io::IO,::MIME"text/plain", topo::IHTopology{N}) where N
     @unpack h2next,h2v,h2f,v2h,f2h = topo
     println(io,"Implicit Halfedge Topology with $(nfaces(topo)) faces (degree $(iszero(N) ? "arbitrary" : N)), $(nvertices(topo)) vertices, and $(nhalfedges(topo)) halfedges:")
@@ -179,6 +209,7 @@ function Base.iterate(iter::VHIterator, h::HID)
 end
 
 # const VVIterator = Base.Generator{Base.Iterators.Zip{Tuple{VHIterator}}, IterTools.var"#1#2"{<:Function}}
+
 """Constructs an iterator over all neighboring vertices of a vertex."""
 VVIterator(topo::IHTopology,v::VID) = imap(∂headvertex(topo),VHIterator(topo,v))
 """Constructs an iterator over all adjacent faces of a vertex; if the vertex is on a boundary, the external face with be included as a `nothing` term."""
@@ -219,13 +250,17 @@ FVIterator(topo::IHTopology{N}, f::FID) where N = imap(∂headvertex(topo),FHIte
 FFIterator(topo::IHTopology{N}, f::FID) where N = imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f))
 """Iterator over all adjacent (internal) faces of a face."""
 FIFIterator(topo::IHTopology{N}, f::FID) where N = Iterators.filter(!isnothing, imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f)))
+"""Constructs an iterator over all edges of a face."""
+FEIterator(topo::IHTopology{N}, f::FID) where N = imap(_edge, FHIterator{N}(topo,f))
 """Constructs an iterator over all corners of a face."""
 FCIterator(topo::IHTopology{N}, f::FID) where N = imap(CID,FHIterator{N}(topo,f))
 
+@fix1able isboundary
 isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
+isboundary(topo::IHTopology, e::EID) = @fix1 topo isboundary(_halfedge(e)) | isboundary(twin(_halfedge(e)))
 isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
 isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
-addtofix1!(isboundary)
+
 
 import Meshes: element, facet
 element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))))
@@ -558,3 +593,9 @@ Base.convert(::Type{IHTopology{N}}, topo::Topology) where N = IHTopology{N}(coll
 
 # next(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.next)
 # twin(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.twin)
+
+
+################################ Topology modification ##################################
+
+# function flipedge!(topo::IHTopology{3}, h::HID)
+    

@@ -28,10 +28,9 @@ next(mesh::IHMesh, cid::CID) = next(topology(mesh),cid)
 vertex(mesh::IHMesh, cid::CID) = vertex(topology(mesh),cid)
 face(mesh::IHMesh,cid::CID) = face(topology(mesh),cid)
 
-topoint(mesh::IHMesh, v::VID) = vertices(mesh)[v]
-addtofix1!(topoint)
-tovec(mesh::IHMesh, h::HID) = @fix1 mesh topoint(headvertex(h)) - topoint(vertex(h))
-addtofix1!(tovec)
+@fix1able topoint(mesh::IHMesh, v::VID) = vertices(mesh)[v]
+@fix1able tovec(mesh::IHMesh, h::HID) = @fix1 mesh topoint(headvertex(h)) - topoint(vertex(h))
+
 toface(mesh::IHMesh, f::FID) = mesh[f]
 toface(mesh::IHMesh, h::HID) = mesh[face(mesh,h)]
 
@@ -112,16 +111,16 @@ function normalize!(mesh::IHMesh{Dim,T}; rescale::Bool=true) where {Dim,T}
     return mesh
 end
 
-Meshes.∠(mesh::IHMesh, c::CID) = @fix1 mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
-addtofix1!(∠)
+import Meshes: ∠
+@fix1able ∠(mesh::IHMesh, c::CID) = @fix1 mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
+
 _cotan(v1::T, v2::T) where T<:Vec = dot(v1,v2)/norm(cross(v1,v2))
-cotan(mesh::IHTriMesh, c::CID) = @fix1 mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
-addtofix1!(cotan)
-unsafe_opp_corner(mesh::IHTriMesh,h::HID) = unsafe_opp_corner(topology(mesh),h)
-opp_corner(mesh::IHTriMesh,h::HID) = opp_corner(topology(mesh),h)
-unsafe_opp_halfedge(mesh::IHTriMesh,c::CID) = unsafe_opp_halfedge(topology(mesh),c)
-opp_halfedge(mesh::IHTriMesh,c::CID) = opp_halfedge(topology(mesh),c)
-addtofix1!(unsafe_opp_corner, opp_corner, unsafe_opp_halfedge, opp_halfedge)
+@fix1able cotan(mesh::IHTriMesh, c::CID) = @fix1 mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
+@fix1able unsafe_opp_corner(mesh::IHTriMesh,h::HID) = unsafe_opp_corner(topology(mesh),h)
+@fix1able opp_corner(mesh::IHTriMesh,h::HID) = opp_corner(topology(mesh),h)
+@fix1able unsafe_opp_halfedge(mesh::IHTriMesh,c::CID) = unsafe_opp_halfedge(topology(mesh),c)
+@fix1able opp_halfedge(mesh::IHTriMesh,c::CID) = opp_halfedge(topology(mesh),c)
+
 
 dihedral_angle(::IHMesh{2,T}, ::HID) where T = zero(T)
 function dihedral_angle(mesh::IHMesh{Dim,T}, h::HID) where {Dim,T}
@@ -226,7 +225,7 @@ function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real) where {Dim,T}
     linsolve = init(prob,KrylovJL_CG());
     Ph_dims[1] = solve!(linsolve)
     for dim in 2:Dim
-        linsolve = LinearSolve.set_b(linsolve,M*P0_dims[dim])
+        linsolve.b = M*P0_dims[dim]
         Ph_dims[dim] = solve!(linsolve)
     end
     
@@ -244,15 +243,23 @@ using Profile, PProf, BenchmarkTools
 topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]])
 pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
 pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
+trumpet = IHMesh("test-obj/trumpet.obj")
 ear = IHMesh("test-obj/ear.obj")
 arrowhead = IHMesh("test-obj/arrowhead.obj")
 # dragon = IHMesh("test-obj/dragon.obj")
 
-@profview mean_curvature_flow!(arrowhead,0.01)
-pprof()
+# @profview mean_curvature_flow!(arrowhead,0.01)
+# pprof()
 
-# IHMesh("test-obj/arrowhead.obj",show_progress=false)
-# display(@benchmark IHMesh("test-obj/arrowhead.obj",show_progress=false))
+using GLMakie
+using Revise
+using MeshViz
+GLMakie.Makie.inline!(false)
+
+viz(arrowhead)
+mean_curvature_flow!(arrowhead,0.5)
+viz(arrowhead)
+
 # enable_timer!(to)
 # _mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
 # to
