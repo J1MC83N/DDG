@@ -1,5 +1,5 @@
 include("halfedges.jl")
-using LinearAlgebra
+using LinearAlgebra, SparseArrays, LinearSolve
 
 const ImplicitHalfEdgeMesh{Dim,T,V<:AbstractVector{Point{Dim,T}},N} = SimpleMesh{Dim,T,V,ImplicitHalfEdgeTopology{N}}
 const IHMesh = ImplicitHalfEdgeMesh
@@ -10,6 +10,10 @@ IHTriMesh(P::V, topo::IHTopology{3}) where {Dim,T,V<:AbstractVector{Point{Dim,T}
 nfaces(mesh::IHMesh) = nfaces(topology(mesh))
 nhalfedges(mesh::IHMesh) = nhalfedges(topology(mesh)) 
 nhvf(mesh::IHMesh) = nhvf(topology(mesh))
+
+vertexids(mesh::IHMesh) = vertexids(mesh.topology)
+halfedgeids(mesh::IHMesh) = halfedgeids(mesh.topology)
+faceids(mesh::IHMesh) = faceids(mesh.topology)
 
 next(mesh::IHMesh, hid::HID) = next(topology(mesh),hid)
 twin(::IHMesh, hid::HID) = hidtwin(hid)
@@ -25,8 +29,9 @@ vertex(mesh::IHMesh, cid::CID) = vertex(topology(mesh),cid)
 face(mesh::IHMesh,cid::CID) = face(topology(mesh),cid)
 
 topoint(mesh::IHMesh, v::VID) = vertices(mesh)[v]
+addtofix1!(topoint)
 tovec(mesh::IHMesh, h::HID) = @fix1 mesh topoint(headvertex(h)) - topoint(vertex(h))
-addtofix1!(topoint,tovec)
+addtofix1!(tovec)
 toface(mesh::IHMesh, f::FID) = mesh[f]
 toface(mesh::IHMesh, h::HID) = mesh[face(mesh,h)]
 
@@ -63,7 +68,7 @@ Construct an implicit halfedge mesh from a .obj file. Setting `check_orientabili
 function IHMesh(filename::AbstractString; check_orientability::Bool=true, show_progress::Union{Nothing,Bool}=nothing)
     something(show_progress,false) && println("Reading obj file...")
     @timeit to "obj read" vertices,faces,N = obj_read(filename)
-    show_progress = isnothing(show_progress) ? length(faces)>10^5 : show_progress
+    show_progress = isnothing(show_progress) ? length(faces)>10^6 : show_progress
     IHMesh(vertices, IHTopology{N}(faces, length(vertices); check_orientability, show_progress))
 end
 
@@ -74,9 +79,38 @@ for FXIterator in [:FHIterator, :FVIterator, :FFIterator, :FIFIterator, :FCItera
     @eval $FXIterator(mesh::IHMesh, f::FID) = $FXIterator(topology(mesh),f)
 end
 
+import Meshes: element
+function element(mesh::IHMesh{Dim,T,V,0},f::Integer) where {Dim,T,V}
+    P = [mesh.vertices[vid] for vid in FVIterator(mesh,FID(f))]
+    Ngon{length(P),Dim,T,Vector{Point{Dim,T}}}
+end
+function element(mesh::IHMesh{Dim,T,V,N},f::Integer) where {Dim,T,V,N}
+    Ngon{N,Dim,T,Vector{Point{Dim,T}}}([mesh.vertices[vid] for vid in FVIterator(mesh,FID(f))])
+end
+
 isboundary(mesh::IHMesh, h::HID) = isboundary(topology(mesh),h)
 isboundary(mesh::IHMesh, f::FID) = isboundary(topology(mesh),f)
 isboundary(mesh::IHMesh, v::VID) = isboundary(topology(mesh),v)
+
+center_of_mass(positions::AbstractArray{<:Point}) = sum(coordinates,positions)/length(positions)
+center_of_mass(mesh::IHMesh) = center_of_mass(mesh.vertices)
+function normalize!(mesh::IHMesh{Dim,T}; rescale::Bool=true) where {Dim,T}
+    positions = mesh.vertices
+    com = center_of_mass(positions)
+    
+    radius = zero(T)
+    for vid in vertexids(mesh)
+        radius = max(radius, norm(coordinates(positions[vid])))
+        positions[vid] -= com
+    end
+    
+    if rescale
+        for vid in vertexids(mesh)
+            positions[vid] = Point{Dim,T}(coordinates(positions[vid])/radius)
+        end
+    end
+    return mesh
+end
 
 Meshes.∠(mesh::IHMesh, c::CID) = @fix1 mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
 addtofix1!(∠)
@@ -101,10 +135,11 @@ function dihedral_angle(mesh::IHMesh{Dim,T}, h::HID) where {Dim,T}
     return atan(sinθ,cosθ)
 end
 
+import Meshes: area, normal
 Meshes.area(mesh::IHMesh, f::FID) = area(mesh[f])
 Meshes.normal(mesh::IHMesh, f::FID) = normal(mesh[f])
 
-# barycentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T} = sum(f -> isnothing(f) ? zero(T) : area(mesh,f), VFIterator(mesh,v))/3
+
 barycentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T} = sum(f->area(mesh,f), VIFIterator(mesh,v))/3
 
 function cotan_sum(mesh::IHTriMesh{Dim,T}, h::HID) where {Dim,T}
@@ -150,48 +185,84 @@ function vn_fun_iter(mesh::Mesh, v::VID, ::MeanCurvature)
     (fun, VHIterator(mesh, v))
 end
 
-# function IHMesh{3,T,V,N}(objfile::AbstractString) where {T,V,N}
-#     vertices = Point{3, T}[]
-#     soup = Vector{VID}[]
-#     for line in eachline(objfile)
-#         point = matchf(r"^v ([ \-\d.]*)$", line) do m::RegexMatch
-#             parse.(T,split(m.captures[1]))
-#         end
-#         !isnothing(point) && push!(vertices,Point{3, T}(point))
-#         poly = matchf(r"^f ([ \d]*)$", line) do m::RegexMatch
-#             parse.(VID,split(m.captures[1]))
-#         end
-#         !isnothing(poly) && push!(soup,poly)
-#     end
-#     return IHMesh{3,T,V,N}(vertices,IHTopology{N}(soup,nvertices_obj(objfile)))
-# end
-# IHMesh(objfile::AbstractString, N::Int) = IHMesh{3,Float32,Vector{Point{3,Float32}},N}(objfile)
 
-# _topo = IHTopology{3}([[1,2,3],[2,3,4]])
-# _gourd = IHTopology{3}("test-obj/gourd.obj")
+include("laplacematrix.jl")
+# massmatrix(mesh::IHTriMesh) = Diagonal([barycentric_dual_area(mesh, vid) for vid in vertexids(mesh)])
+function massmatrix(mesh::IHTriMesh{Dim,T}) where {Dim,T}
+    v_mass = zeros(T, nvertices(mesh))
+    for fid in faceids(mesh)
+        farea3 = area(mesh, fid)/3
+        for vid in FVIterator(mesh, fid)
+            v_mass[vid] += farea3
+        end
+    end
+    Diagonal(v_mass)
+end
 
-# _mesh = IHMesh(Point2[(0,0),(0,1),(1,0),(1,1)],_topo)
-# _mesh3 = IHMesh(Point3[(0,0,0),(0,1,0),(1,0,0),(1,1,0)],_topo)
-# _topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]])
-# _pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], _topo_pyramid)
-# _pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], _topo_pyramid)
-# _face = _mesh[1]
+function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
+    np = length(points)
+    out = ntuple(_->Vector{T}(undef,np),Val{Dim}())
+    @inbounds for ip in 1:np
+        coords = coordinates(points[ip])
+        for dim in 1:Dim
+            out[dim][ip] = coords[dim]
+        end
+    end
+    return out
+end
 
+# solves, APₕ = MP₀, where A = M(I-h*Δ) = M+h*L, L=-MΔ
+function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real) where {Dim,T}
+    @assert Dim > 2
+    h = convert(T, h)
+    vertices = mesh.vertices
+    M,L = massmatrix(mesh), laplacematrix(mesh, shift=eps(T))
+    A = M+h*L
+    P0_dims = splitbydim(vertices)
+    
+    # solving
+    Ph_dims = Vector{Vector{T}}(undef,Dim)
+    prob = LinearProblem(A,M*P0_dims[1])
+    linsolve = init(prob,KrylovJL_CG());
+    Ph_dims[1] = solve!(linsolve)
+    for dim in 2:Dim
+        linsolve = LinearSolve.set_b(linsolve,M*P0_dims[dim])
+        Ph_dims[dim] = solve!(linsolve)
+    end
+    
+    # updating vertex positions
+    @inbounds for vid in vertexids(mesh)
+        point = Point{Dim,T}([Ph_dims[dim][vid] for dim in 1:Dim])
+        vertices[vid] = point
+    end
+    
+    return mesh
+end
 
 
 using Profile, PProf, BenchmarkTools
-IHMesh("test-obj/arrowhead.obj",show_progress=false)
-display(@benchmark IHMesh("test-obj/arrowhead.obj",show_progress=false))
-enable_timer!(to)
-_mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
-to
+topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]])
+pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
+pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
+ear = IHMesh("test-obj/ear.obj")
+arrowhead = IHMesh("test-obj/arrowhead.obj")
+# dragon = IHMesh("test-obj/dragon.obj")
+
+@profview mean_curvature_flow!(arrowhead,0.01)
+pprof()
+
+# IHMesh("test-obj/arrowhead.obj",show_progress=false)
+# display(@benchmark IHMesh("test-obj/arrowhead.obj",show_progress=false))
+# enable_timer!(to)
+# _mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
+# to
 
 """
 actual single thread: with IMDict N=6
 BenchmarkTools.Trial: 9 samples with 1 evaluation.
- Range (min … max):  576.465 ms … 621.762 ms  ┊ GC (min … max): 6.05% … 6.63%
- Time  (median):     596.140 ms               ┊ GC (median):    5.85%
- Time  (mean ± σ):   596.640 ms ±  13.816 ms  ┊ GC (mean ± σ):  6.03% ± 0.45%
+ Range (min … max):  561.540 ms … 580.230 ms  ┊ GC (min … max): 5.76% … 7.33%
+ Time  (median):     573.638 ms               ┊ GC (median):    7.38%
+ Time  (mean ± σ):   573.049 ms ±   6.103 ms  ┊ GC (mean ± σ):  7.06% ± 0.92%
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
                                             ───────────────────────   ────────────────────────
@@ -207,9 +278,9 @@ BenchmarkTools.Trial: 9 samples with 1 evaluation.
    face connectivity construction        1   15.3ms    2.5%  15.3ms   28.6MiB   12.9%  28.6MiB
  ─────────────────────────────────────────────────────────────────────────────────────────────
  """
-reset_timer!(to)
-@time IHMesh("test-obj/dragon.obj",show_progress=false)
-to
+# reset_timer!(to)
+# @time IHMesh("test-obj/dragon.obj",show_progress=false)
+# to
 """
 actual single thread: with IMDict N=6
 8.283949 seconds (37.54 M allocations: 4.115 GiB, 8.84% gc time)
@@ -228,7 +299,7 @@ actual single thread: with IMDict N=6
  mesh construction                       1    1.56s   20.4%   1.56s     0.00B    0.0%    0.00B
  ─────────────────────────────────────────────────────────────────────────────────────────────
 
-8 threads: with IMDict N=7
+8 threads: with IMDict N=6
 7.693358 seconds (90.04 M allocations: 5.344 GiB, 11.08% gc time)
 ─────────────────────────────────────────────────────────────────────────────────────────────
                                                     Time                    Allocations      
@@ -252,6 +323,3 @@ mesh construction                       1    900ms   13.1%   900ms   1.23GiB   3
 
 # _v = zeros(Int,nvertices(_mesh))
 # for ((v1,v2),_) in _E2FID; _v[v1] += 1 end
-
-@profview IHMesh("test-obj/dragon.obj",show_progress=false)
-pprof()

@@ -78,6 +78,10 @@ nfaces(topo::IHTopology) = nfaces(topo,2)
 nelements(topo::IHTopology) = length(topo.f2h)
 nhvf(topo::IHTopology) = (nhalfedges(topo),nvertices(topo),nfaces(topo))
 
+vertexids(topo::IHTopology) = VID(1):VID(nvertices(topo))
+halfedgeids(topo::IHTopology) = HID(1):HID(nhalfedges(topo))
+faceids(topo::IHTopology) = FID(1):FID(nfaces(topo))
+
 # convenience methods for getting around an IHTopology, also improve code readability
 next(topo::IHTopology,hid::HID) = topo.h2next[hid]
 hidtwin(id::HID) = HID(((id-1)⊻1)+1)
@@ -403,11 +407,11 @@ end
 
 modoff1(x::T,y::Integer) where T = T(mod(x-1,y)+1)
 """
-    IHTopology{N}(polys[, nv]; check_orientability=true, show_progress=length(polys)>10^5)
+    IHTopology{N}(polys[, nv]; check_orientability=true, show_progress=length(polys)>10^6)
 
 Construct an implicit halfedge topology with a polygon (or connectivity rather) soup. `polys` is a Vector of `AbstractVectors` of `VID`, and `nv` is the total number of vertices (determined from `polys` if not provided). Setting `check_orientability` to `false` disables all checks on mesh orientability, but does not promise producing a valid halfedge mesh. 
 """
-function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); check_orientability::Bool=true, show_progress::Bool=length(polys)>10^5) where {N,F<:AbstractVector{VID}}
+function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); check_orientability::Bool=true, show_progress::Bool=length(polys)>10^6) where {N,F<:AbstractVector{VID}}
     # polys provides face=>edge assocation
     nf = length(polys)
     @assert N == 0 || all(f->length(f)==N,polys)
@@ -455,7 +459,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     show_progress && println("Constructing mesh...\n", '-'^100)
     @timeit to "mesh construction" @threads_maybe for ie = 1:ne
         ie = EID(ie)
-        show_progress && g(ie,ne,100) && print("#")
+        show_progress && g(Int(ie),ne,100) && print("#")
         edge = IE2E[ie]
         v1id,v2id = oedge = Tuple(edge)
         
@@ -507,7 +511,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
         isused || (v2h[i] = INVALID_ID)
     end
     show_progress && @show mean(E2FID.K22V.sizes)
-    show_progress && @show length(E2FID.K22V.rest)
+    show_progress && @show length(E2FID.K22V.rest)/length(E2FID.K22V)
     # global _E2FID = E2FID
     return IHTopology{N}(h2next,h2v,h2f,v2h,f2h)
 end

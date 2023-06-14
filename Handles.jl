@@ -57,7 +57,7 @@ macro HandleType(tname)
   esc(
       quote 
         primitive type $tname <: Handle sizeof(Int)*8 end
-        $tname(x::T) where {T<:Integer} = reinterpret($tname, Int(x))
+        $tname(x::T) where {T<:Integer} = reinterpret($tname, UInt64(unsigned(x)))
       end
      )
 end
@@ -68,7 +68,7 @@ macro HandleType_alias(tname,alias)
   esc(
       quote
         primitive type $tname <: Handle sizeof(Int)*8 end
-        $tname(x::T) where {T<:Integer} = reinterpret($tname, Int(x))
+        $tname(x::T) where {T<:Integer} = reinterpret($tname, UInt64(unsigned(x)))
         const $alias = $tname
       end
      )
@@ -76,9 +76,11 @@ end
 
 Base.show(io::IO, x::Handle) = print(io, Int(x))
 Base.string(x::Handle) = string(Int(x))
-Base.ndigits0zpb( c::C, i::Integer ) where C<:Handle = ndigits0zpb( Int(c), i )
+Base.ndigits0zpb( c::C, i::Integer ) where C<:Handle = ndigits0zpb( UInt64(c), i )
 Base.promote_rule( ::Type{C}, ::Type{I} ) where {C<:Handle,I<:Integer} = C
-Base.convert( ::Type{C}, number::Number ) where {C<:Handle} = C(Int(number))
+Base.convert( ::Type{C}, number::Number ) where {C<:Handle} = C(UInt64(number))
+Base.typemax(::Type{C}) where {C<:Handle} = C(typemax(UInt64))
+Base.typemin(::Type{C}) where {C<:Handle} = C(typemin(UInt64))
 
 Base.Int(x::Handle) = reinterpret(Int,x)
 Base.UInt(x::Handle) = reinterpret(UInt,x)
@@ -90,19 +92,19 @@ Base.UInt128(x::Handle) = UInt128(reinterpret(UInt,x))
 Base.hash(d::Handle, x::UInt64) = hash(reinterpret(UInt64,d),x)
 
 for op in (:+, :-, :*, :/, :mod, :div, :rem, :max, :min, :xor)
-  @eval Base.$op(a::H, b::H) where {H<:Handle} = H($op(Int(a),Int(b)))
+  @eval Base.$op(a::H, b::H) where {H<:Handle} = H($op(UInt64(a),UInt64(b)))
 end
 
 for op in (:<, :>, :<=, :>=)
-  @eval Base.$op(a::H, b::H) where {H<:Handle} = $op(Int(a),Int(b))
+  @eval Base.$op(a::H, b::H) where {H<:Handle} = $op(UInt64(a),UInt64(b))
 end
 
-for op in (:<<, :>>)
-  @eval Base.$op(a::H, b::I) where {H<:Handle, I<:Int} = H($op(Int(a),Int(b)))
+for op in (:<<, :>>), IS in (Int, UInt64)
+  @eval Base.$op(a::H, b::I) where {H<:Handle, I<:$IS} = H($op(UInt64(a),UInt64(b)))
 end
 
 for from in Base.BitInteger_types
-  if sizeof(Int) < sizeof(from)
+  if sizeof(UInt64) < sizeof(from)
     @eval Base.rem(x::($from), ::Type{T}) where T<:Handle = Base.trunc_int(T, x)
   end
 end
@@ -110,6 +112,6 @@ end
 Base.parse(::Type{H},str::AbstractString) where H<:Handle = H(parse(Int,str))
 
 Base.sub_with_overflow( a::H, b::H ) where {H<:Handle} = 
-  ((r,f)->(H(r),f))(Base.sub_with_overflow(Int(a), Int(b))...)
+  ((r,f)->(H(r),f))(Base.sub_with_overflow(UInt64(a), UInt64(b))...)
 Base.add_with_overflow( a::H, b::H ) where {H<:Handle} = 
-  ((r,f)->(H(r),f))(Base.add_with_overflow(Int(a), Int(b))...)
+  ((r,f)->(H(r),f))(Base.add_with_overflow(UInt64(a), UInt64(b))...)
