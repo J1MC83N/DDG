@@ -99,7 +99,7 @@ for op in (:<, :>, :<=, :>=)
   @eval Base.$op(a::H, b::H) where {H<:Handle} = $op(UInt64(a),UInt64(b))
 end
 
-for op in (:<<, :>>), IS in (Int, UInt64)
+for op in (:<<, :>>), IS in (Int64, UInt64)
   @eval Base.$op(a::H, b::I) where {H<:Handle, I<:$IS} = H($op(UInt64(a),UInt64(b)))
 end
 

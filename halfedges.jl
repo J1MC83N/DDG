@@ -90,32 +90,33 @@ edgeids(topo::IHTopology) = EID(1):EID(nedges(topo))
 faceids(topo::IHTopology) = FID(1):FID(nfaces(topo))
 
 # convenience methods for getting around an IHTopology, also improve code readability
-next(topo::IHTopology,hid::HID) = topo.h2next[hid]
+import Base: @propagate_inbounds
+@propagate_inbounds next(topo::IHTopology,hid::HID) = topo.h2next[hid]
 _twin(id::HID) = HID(((id-1)⊻1)+1)
 twin(::IHTopology,hid::HID) = _twin(hid)
 prev(topo::IHTopology,hid::HID) = findfirst(==(hid),topo.h2next)
-vertex(topo::IHTopology,hid::HID) = topo.h2v[hid]
-headvertex(topo::IHTopology,hid::HID) = vertex(topo,next(topo,hid))
-face(topo::IHTopology,hid::HID) = topo.h2f[hid]
-halfedge(topo::IHTopology,vid::VID) = topo.v2h[vid]
+@propagate_inbounds vertex(topo::IHTopology,hid::HID) = topo.h2v[hid]
+@propagate_inbounds headvertex(topo::IHTopology,hid::HID) = vertex(topo,next(topo,hid))
+@propagate_inbounds face(topo::IHTopology,hid::HID) = topo.h2f[hid]
+@propagate_inbounds halfedge(topo::IHTopology,vid::VID) = topo.v2h[vid]
 _halfedge(eid::EID) = HID(2eid-1)
 halfedge(::IHTopology,eid::EID) = _halfedge(eid)
-halfedge(topo::IHTopology,fid::FID) = topo.f2h[fid]
-_edge(hid::HID) = EID((hid+1)÷2)
+@propagate_inbounds halfedge(topo::IHTopology,fid::FID) = topo.f2h[fid]
+_edge(hid::HID) = EID((hid+1)>>1)
 edge(::IHTopology,hid::HID) = _edge(hid)
-edge(topo::IHTopology,vid::VID) = edge(topo,halfedge(topo,vid))
-edge(topo::IHTopology,fid::FID) = edge(topo,halfedge(topo,fid))
+@propagate_inbounds edge(topo::IHTopology,vid::VID) = edge(topo,halfedge(topo,vid))
+@propagate_inbounds edge(topo::IHTopology,fid::FID) = edge(topo,halfedge(topo,fid))
 
 # the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
 halfedge(::IHTopology,cid::CID) = HID(cid)
-next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
-vertex(topo::IHTopology,cid::CID) = headvertex(topo,HID(cid))
-face(topo::IHTopology,cid::CID) = face(topo,HID(cid))
+@propagate_inbounds next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
+@propagate_inbounds vertex(topo::IHTopology,cid::CID) = headvertex(topo,HID(cid))
+@propagate_inbounds face(topo::IHTopology,cid::CID) = face(topo,HID(cid))
 # opposite halfedge/corner in a triangle
-unsafe_opp_corner(topo::IHTopology{3},h::HID) = CID(next(topo,h))
-opp_corner(topo::IHTopology{3},h::HID) = (@assert !isnothing(face(topo,h)); unsafe_opp_corner(topo,h))
-unsafe_opp_halfedge(topo::IHTopology{3},c::CID) = next(topo,next(topo,HID(c)))
-opp_halfedge(topo::IHTopology{3},c::CID) = (@assert !isnothing(face(topo,c)); unsafe_opp_corner(topo,c))
+@propagate_inbounds unsafe_opp_corner(topo::IHTopology{3},h::HID) = CID(next(topo,h))
+@propagate_inbounds opp_corner(topo::IHTopology{3},h::HID) = (@assert !isnothing(face(topo,h)); unsafe_opp_corner(topo,h))
+@propagate_inbounds unsafe_opp_halfedge(topo::IHTopology{3},c::CID) = next(topo,next(topo,HID(c)))
+@propagate_inbounds opp_halfedge(topo::IHTopology{3},c::CID) = (@assert !isnothing(face(topo,c)); unsafe_opp_corner(topo,c))
 
 # define partial applications
 const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :edge])
@@ -158,19 +159,32 @@ const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headver
 _addtofix1!(fs::Union{Function,Symbol}...) = push!(_FIX1_METHODS,Symbol.(fs)...)
 
 using MyMacros
+
+function _fix1able(fdef)
+    @assert isa(fdef, Expr)
+    if fdef.head === :macrocall
+        addfix1,fdef_ = _fix1able(fdef.args[end])
+        return addfix1,Expr(:macrocall,fdef.args[1:end-1]...,fdef_)
+    end
+    @assert fdef.head === :function || Base.is_short_function_def(fdef)
+    fname = MyMacros.fname(fdef)
+    addfix1 = :(_addtofix1!($(Meta.quot(fname))))
+    return addfix1, fdef
+end
+macro fix1able(fdef)
+    addfix1,fdef = _fix1able(fdef)
+    quote
+        $addfix1
+        $fdef
+    end |> esc
+end
 macro fix1able(fname::Symbol)
     quote
         _addtofix1!($(Meta.quot(fname)))
     end |> esc
 end
-macro fix1able(f)
-    @assert isa(f, Expr) && (f.head === :function || Base.is_short_function_def(f))
-    fname = MyMacros.fname(f)
-    quote
-        _addtofix1!($(Meta.quot(fname)))
-        $f
-    end |> esc
-end
+
+
 
 
 cut_vector_typeinfo(str::AbstractString) = replace(str,r"^[\w\{\}, ]+\["=>"[")
@@ -261,6 +275,13 @@ isboundary(topo::IHTopology, e::EID) = @fix1 topo isboundary(_halfedge(e)) | isb
 isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
 isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
 
+function find_halfedge(topo::IHTopology,v1::VID,v2::VID)
+    for h in VHIterator(topo,v1)
+        headvertex(topo,h) == v2 && return h
+    end
+    nothing
+end
+find_edge(topo::IHTopology,v1::VID,v2::VID) = _edge(find_halfedge(topo,v1,v2))
 
 import Meshes: element, facet
 element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))))
@@ -561,6 +582,10 @@ IHTopology{0}(elems::AbstractVector{<:Connectivity}) = IHTopology{0}([collect(VI
 IHTopology{N}(elems::AbstractVector{<:Connectivity{<:Any,N}}) where N = IHTopology{N}([SVector{N,VID}(indices(c)) for c in elems])
 IHTopology(elems::AbstractVector{<:Connectivity{<:Any,N}}) where N = IHTopology{N}(elems)
 _allequal(v::AbstractVector) = isempty(v) ? true : all(==(first(v)),v)
+function facedegree(topo::Topology)
+    N = _connectivity_size(first(elements(topo)))
+    return all(elem->_connectivity_size(elem)==N,elements(topo)) ? N : 0
+end
 function IHTopology(elems::AbstractVector{<:Connectivity})
     if _allequal(_connectivity_size.(elems))
         N = _connectivity_size(first(elems))
@@ -571,10 +596,14 @@ function IHTopology(elems::AbstractVector{<:Connectivity})
 end
 
 Base.convert(::Type{IHTopology}, topo::IHTopology) = topo
-Base.convert(::Type{IHTopology}, topo::Topology) = IHTopology(collect(elements(topo)))
+Base.convert(::Type{IHTopology}, topo::Topology) = IHTopology{facedegree(topo)}(collect(elements(topo)))
+Base.convert(::Type{IHTopology{0}}, topo::IHTopology{0}) = topo
 Base.convert(::Type{IHTopology{N}}, topo::IHTopology{N}) where N = topo
-Base.convert(::Type{IHTopology{N}}, topo::Topology) where N = IHTopology{N}(collect(elements(topo)))
-
+Base.convert(::Type{IHTopology{0}}, topo::Topology) = IHTopology{0}(collect(elements(topo)))
+function Base.convert(::Type{IHTopology{N}}, topo::Topology) where N
+    @assert N == facedegree(topo)
+    IHTopology{N}(collect(elements(topo)))
+end
 
 ################################ Convenient HalfEdge type ###############################
 
@@ -597,5 +626,55 @@ Base.convert(::Type{IHTopology{N}}, topo::Topology) where N = IHTopology{N}(coll
 
 ################################ Topology modification ##################################
 
-# function flipedge!(topo::IHTopology{3}, h::HID)
+function graphviz(topo::IHTopology,engine="sfdp")
+    buffer = IOBuffer(append=true)
+    println(buffer,'\n')
+    for e in edgeids(topo)
+        h = _halfedge(e)
+        v,hv = @fix1 topo (vertex(h), headvertex(h))
+        println(buffer,"    $v -> $hv [headlabel=$h,taillabel=$(_twin(h)),dir=both]")
+    end
+    """
+    digraph {
+        nodesep=0.4
+        layout = $engine
+        repulsiveforce=1.5
+        node [shape=circle]
+        edge [labeldistance=1.5]
+        $(String(take!(buffer)))
+    }
+    """ |> clipboard
+end
+
+function flipedge!(topo::IHTopology{3}, e::EID)
+    @assert !isboundary(topo, e)
     
+    # face f1 is h1->h11->h12, face f2 = h2->h21->h22
+    h1 = _halfedge(e)
+    h2 = _twin(h1)
+    h11,h21 = @fix1 topo (next(h1), next(h2))
+    h12,h22 = @fix1 topo (next(h11), next(h21))
+    f1::FID,f2::FID = @fix1 topo (face(h1), face(h2))
+    v1,v2 = @fix1 topo (vertex(h1), vertex(h2))
+    
+    for (h,hnext) in ((h1,h22), (h2,h12), (h11,h1), (h21,h2), (h12,h21), (h22,h11))
+        topo.h2next[h] = hnext
+    end
+    for (h,f) in ((h11,f1), (h22,f1), (h12,f2), (h21,f2))
+        topo.h2f[h] = f
+    end
+    topo.h2v[h1] = vertex(topo, h12)
+    topo.h2v[h2] = vertex(topo, h22)
+    topo.f2h[f1] = h1
+    topo.f2h[f2] = h2
+    topo.v2h[v1] = h21
+    topo.v2h[v2] = h11
+    return topo
+end
+flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
+
+# square = IHTopology{3}([[1,2,3],[1,3,4]])
+# graphviz(square,"circo")
+# flipedge!(square,find_edge(square,VID(1),VID(3)))
+
+# graphviz(grid)
