@@ -10,7 +10,7 @@ Naming conventions:
 =#
 
 using Pkg; Pkg.activate(".")
-using Meshes, StaticArrays, UnPack, Multisets, Bijections, DataStructures, IterTools, ProgressMeter, Statistics
+using Meshes, StaticArrays, UnPack, Bijections, DataStructures, IterTools, ProgressMeter, Statistics
 using TimerOutputs; const to = TimerOutput(); disable_timer!(to)
 
 macro threads_maybe(ex)
@@ -67,6 +67,9 @@ struct ImplicitHalfEdgeTopology{N} <: Topology
 end
 const IHTopology = ImplicitHalfEdgeTopology
 
+import Base.copy
+copy(topo::IHTopology{N}) where N = deepcopy(topo)
+
 """
 Relationship between edge handle and halfedge handle:
 HID: [1,2,3,4,5,6,7,8]
@@ -106,6 +109,10 @@ _edge(hid::HID) = EID((hid+1)>>1)
 edge(::IHTopology,hid::HID) = _edge(hid)
 @propagate_inbounds edge(topo::IHTopology,vid::VID) = edge(topo,halfedge(topo,vid))
 @propagate_inbounds edge(topo::IHTopology,fid::FID) = edge(topo,halfedge(topo,fid))
+@propagate_inbounds function bothvertex(topo::IHTopology,eid::EID)
+    hid = _halfedge(eid)
+    return vertex(topo,hid), headvertex(topo,hid)
+end
 
 # the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
 halfedge(::IHTopology,cid::CID) = HID(cid)
@@ -155,7 +162,7 @@ function _fix1(fixed,ex::Expr)
 end
 _fix1(fixed,ex) = esc(ex)
 
-const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge, :edge])
+const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge, :edge, :bothvertex])
 _addtofix1!(fs::Union{Function,Symbol}...) = push!(_FIX1_METHODS,Symbol.(fs)...)
 
 using MyMacros
@@ -293,80 +300,7 @@ end
 
 ############################# validation #############################
 
-""" Find the orbit of an halfedge w.r.t. to the *next* operator """
-function orbit(topo::IHTopology{0},hid::HID)
-    orb = HID[hid]
-    count = 0
-    COUNT_THRESHOLD = nhalfedges(topo)
-    while count < COUNT_THRESHOLD
-        nextid = next(topo,orb[end])
-        nextid == hid && return orb
-        push!(orb, nextid)
-    end
-    error("No orbit found")
-end
-function orbit(topo::IHTopology{N},hid::HID) where N
-    orb = Vector{HID}(undef,N)
-    orb[1] = hid
-    thisid = hid
-    for i in 2:N
-        thisid = next(topo,thisid)
-        thisid != hid || error("Unexpectedly short orbit of length $i, supposed to be $N")
-        orb[i] = thisid
-    end
-    next(topo,thisid) == hid || error("Unexpectedly long orbit: $orb")
-    return orb
-end
-
-@inline ex_in(ex::NTuple{2,<:Real},bounds::NTuple{2,<:Real}) = ex[1] >= bounds[1] && ex[2] <= bounds[2]
-function validate_topo_handles(topo::IHTopology)
-    @unpack h2next, h2v, h2f, v2h, f2h = topo
-    @assert length(h2next) == length(h2v) == length(h2f)
-    nh,nv,nf = (h2next,v2h,f2h) .|> length
-    @assert ex_in(extrema(h2next),(1,nh))
-    @assert ex_in(extrema(h2v),(1,nv))
-    @assert ex_in(extrema(filter(!isnothing,h2f)),(1,nf))
-    @assert ex_in(extrema(v2h),(1,nh))
-    @assert ex_in(extrema(f2h),(1,nh))
-    nothing
-end
-
-function validate_topo_faceorbits(topo::IHTopology)
-    @unpack h2f, f2h = topo
-    nh,nv,nf = nhvf(topo)
-    hinternal = zeros(Bool,nh)
-    # ensure that for each face f, the orbit of an halfedge of f (given by h2next) is equal to the set of edges in f (given by h2f)
-    @showprogress for fid in FID(1):nf
-        horbit = orbit(topo,f2h[fid])
-        Multiset(horbit) == Multiset(findall(==(fid),h2f)) || error("Orbit-face mismatch for face $fid: \n$horbit\n$(findall(==(fid),h2f))")
-        hinternal[horbit] .= true
-    end
-    # boundary halfedge conditions
-    @showprogress for hid in HID(1):nh
-        hinternal[hid] && continue
-        nextid = next(topo,hid)
-        !hinternal[nextid] || error("Next ($nextid) of boundary halfedge $hid is not also a boundary")
-    end
-    nothing
-end
-
-validate_topo_facedegree(::IHTopology{0}) = nothing
-function validate_topo_facedegree(topo::IHTopology{N}) where N
-    @unpack f2h = topo
-    @showprogress for fid in FID(1):nfaces(topo)
-        l = length(orbit(topo,f2h[fid]))
-        l == N || error("Orbit of face $fid has length $l, expected $N")
-    end
-    nothing
-end
-
-""" Performs various sanity checks on the self-coherency of the topology """
-function validate_topo(topo::IHTopology)
-    validate_topo_handles(topo)
-    validate_topo_faceorbits(topo)
-    validate_topo_facedegree(topo)
-    nothing
-end
+include("validations.jl")
 
 ################ Methods for constructing IHTopology from polygon soup ##################
 
@@ -626,7 +560,7 @@ end
 
 ################################ Topology modification ##################################
 
-function graphviz(topo::IHTopology,engine="sfdp")
+function graphviz(topo::IHTopology;title="",engine="sfdp")
     buffer = IOBuffer(append=true)
     println(buffer,'\n')
     for e in edgeids(topo)
@@ -636,6 +570,7 @@ function graphviz(topo::IHTopology,engine="sfdp")
     end
     """
     digraph {
+        label=\"$title\"
         nodesep=0.4
         layout = $engine
         repulsiveforce=1.5
@@ -673,7 +608,7 @@ function flipedge!(topo::IHTopology{3}, e::EID)
 end
 flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
 
-# square = IHTopology{3}([[1,2,3],[1,3,4]])
+square = IHTopology{3}([[1,2,3],[1,3,4]])
 # graphviz(square,"circo")
 # flipedge!(square,find_edge(square,VID(1),VID(3)))
 
