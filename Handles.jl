@@ -116,11 +116,11 @@ Base.sub_with_overflow( a::H, b::H ) where {H<:Handle} =
 Base.add_with_overflow( a::H, b::H ) where {H<:Handle} = 
   ((r,f)->(H(r),f))(Base.add_with_overflow(UInt64(a), UInt64(b))...)
 
-import Random: rand, uint_sup, Sampler, AbstractRNG, Repetition, SamplerRangeNDL, SamplerType
-uint_sup(::Type{H}) where H<:Handle = H
-Sampler(::Type{<:Random.AbstractRNG}, r::AbstractUnitRange{H},
+import Random
+Random.uint_sup(::Type{H}) where H<:Handle = H
+Random.Sampler(::Type{<:Random.AbstractRNG}, r::AbstractUnitRange{H},
         ::Random.Repetition) where H<:Handle = Random.SamplerRangeNDL(r)
 Base.widen(::Type{H}) where H<:Handle = UInt128
-rand(rng::AbstractRNG, ::Random.SamplerType{H}) where H<:Handle = H(rand(rng,Random.SamplerType{UInt64}()))
+Base.rand(rng::Random.AbstractRNG, ::Random.SamplerType{H}) where H<:Handle = H(rand(rng,Random.SamplerType{UInt64}()))
 Base.promote_rule(::Type{H},::Type{Int128}) where H<:Handle = Int128
 Base.promote_rule(::Type{H},::Type{UInt128}) where H<:Handle = UInt128

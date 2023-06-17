@@ -10,6 +10,7 @@ Naming conventions:
 =#
 
 using Pkg; Pkg.activate(".")
+using Infiltrator; Infiltrator.toggle_async_check(false)
 using Meshes, StaticArrays, UnPack, Bijections, DataStructures, IterTools, ProgressMeter, Statistics
 using TimerOutputs; const to = TimerOutput(); disable_timer!(to)
 
@@ -87,10 +88,15 @@ nfaces(topo::IHTopology) = nfaces(topo,2)
 nelements(topo::IHTopology) = length(topo.f2h)
 nhvf(topo::IHTopology) = (nhalfedges(topo),nvertices(topo),nfaces(topo))
 
-vertexids(topo::IHTopology) = VID(1):VID(nvertices(topo))
-halfedgeids(topo::IHTopology) = HID(1):HID(nhalfedges(topo))
-edgeids(topo::IHTopology) = EID(1):EID(nedges(topo))
-faceids(topo::IHTopology) = FID(1):FID(nfaces(topo))
+maxvid(topo::IHTopology) = VID(nvertices(topo))
+maxhid(topo::IHTopology) = HID(nhalfedges(topo))
+maxeid(topo::IHTopology) = EID(nedges(topo))
+maxfid(topo::IHTopology) = FID(nfaces(topo))
+
+vertexids(topo::IHTopology) = VID(1):maxvid(topo)
+halfedgeids(topo::IHTopology) = HID(1):maxhid(topo)
+edgeids(topo::IHTopology) = EID(1):maxeid(topo)
+faceids(topo::IHTopology) = FID(1):maxfid(topo)
 
 # convenience methods for getting around an IHTopology, also improve code readability
 import Base: @propagate_inbounds
@@ -113,6 +119,11 @@ edge(::IHTopology,hid::HID) = _edge(hid)
     hid = _halfedge(eid)
     return vertex(topo,hid), headvertex(topo,hid)
 end
+@propagate_inbounds function _bothhalfedge(eid::EID)
+    hid = _halfedge(eid)
+    return hid, hid+1
+end
+@propagate_inbounds bothhalfedge(::IHTopology,eid::EID) = _bothhalfedge(eid)
 
 # the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
 halfedge(::IHTopology,cid::CID) = HID(cid)
@@ -192,8 +203,6 @@ macro fix1able(fname::Symbol)
 end
 
 
-
-
 cut_vector_typeinfo(str::AbstractString) = replace(str,r"^[\w\{\}, ]+\["=>"[")
 
 function Base.show(io::IO,::MIME"text/plain", topo::IHTopology{N}) where N
@@ -225,9 +234,11 @@ function Base.iterate(iter::VHIterator)
 end
 function Base.iterate(iter::VHIterator, h::HID)
     @unpack topo,h_start = iter
+    # yield()
     h_start == h && return nothing
     return (h, @fix1 topo next(twin(h)))
 end
+
 
 # const VVIterator = Base.Generator{Base.Iterators.Zip{Tuple{VHIterator}}, IterTools.var"#1#2"{<:Function}}
 
@@ -240,7 +251,15 @@ VIFIterator(topo::IHTopology,v::VID) = Iterators.filter(!isnothing,imap(∂face(
 """Constructs an iterator over all adjacent corners of a vertex; this include any outward-facing boundary corners."""
 VCIterator(topo::IHTopology,v::VID) = imap(h->CID(twin(topo,h)),VHIterator(topo,v))
 """Constructs an iterator over all adjacent (internal) corners of a vertex."""
-VICIterator(topo::IHTopology{N}, v::VID) where N = (CID(twin(topo,h)) for h in VHIterator(topo,v) if !isnothing(face(topo,h)))
+VICIterator(topo::IHTopology, v::VID) = (CID(twin(topo,h)) for h in VHIterator(topo,v) if !isnothing(face(topo,h)))
+
+@fix1able function vertexdegree(topo::IHTopology,vid::VID)
+    d = 0
+    for h in VHIterator(topo,vid)
+        d += 1
+    end
+    d
+end
 
 """Iterator over all halfedges of a face."""
 struct FHIterator{N}
@@ -282,13 +301,13 @@ isboundary(topo::IHTopology, e::EID) = @fix1 topo isboundary(_halfedge(e)) | isb
 isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
 isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
 
-function find_halfedge(topo::IHTopology,v1::VID,v2::VID)
-    for h in VHIterator(topo,v1)
+function find_halfedge(topo::IHTopology,v1::Integer,v2::Integer)
+    for h in VHIterator(topo,VID(v1))
         headvertex(topo,h) == v2 && return h
     end
     nothing
 end
-find_edge(topo::IHTopology,v1::VID,v2::VID) = _edge(find_halfedge(topo,v1,v2))
+find_edge(topo::IHTopology,v1::Integer,v2::Integer) = _edge(find_halfedge(topo,v1,v2))
 
 import Meshes: element, facet
 element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))))
@@ -437,26 +456,26 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     # now E2FID.K22V has all internal edges, E2FID.K21V has all boundary edges
     ne = length(IE2E)
     nh = 2ne
-    h2next = Vector{VID}(undef,nh)
-    h2v = Vector{VID}(undef,nh)
-    h2f = Vector{Union{FID,Nothing}}(undef,nh)
+    h2next = zeros(VID,nh)
+    h2v = zeros(VID,nh)
+    h2f = Vector{Union{FID,Nothing}}(undef,nh); fill!(h2f,zero(FID))
     v2h = zeros(HID,nv)
     f2h = zeros(HID,nf)
     
-    # for computing h2next at boundaries; record v2v connectivity and hid
-    V2VHID_boundary = Dict{VID,Tuple{VID,HID}}()
+    # for computing h2next at boundaries; for each boundary halfedge: record vertex->[(head,hid),...]
+    V2VHs_boundary = Dict{VID,Vector{Tuple{VID,HID}}}()
     
     show_progress && println("Constructing mesh...\n", '-'^100)
-    @timeit to "mesh construction" @threads_maybe for ie = 1:ne
-        ie = EID(ie)
-        show_progress && g(Int(ie),ne,100) && print("#")
-        edge = IE2E[ie]
+    @timeit to "mesh construction" for ie = 1:ne
+        eid = EID(ie)
+        show_progress && g(Int(eid),ne,100) && print("#")
+        edge = IE2E[eid]
         v1id,v2id = oedge = Tuple(edge)
         
         # constructing h2f and f2h
         fids = f1id,f2id = getboth(E2FID,edge) # f1id is always valid, f2id may be nothing
         # the ordering of twin blocks w.r.t. halfedge handles (ordering of all h2xxx) matches the edge ordering w.r.t. IE2E
-        hids = HID(2(ie-1)).+(1:2)
+        hids = _bothhalfedge(eid)
         zip_hfids = zip(hids,fids)
         for (hid,fid) in zip_hfids
             h2f[hid] = fid
@@ -485,15 +504,17 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
         end
         # working towads h2next for boundary halfedge
         if isnothing(f2id)
-            vid_to,vid_from = vids # intentional reversal: vids happens to represent the first halfedge's direction, so the boundary he as the inverse direction
-            V2VHID_boundary[vid_from] = (vid_to, hids[2])
+            vid_to,vid_from = vids # intentional reversal: vids happens to represent the first halfedge's direction, so the boundary he, which is the twin, has the inverse direction
+            vhs = get!(V2VHs_boundary,vid_from,Tuple{VID,HID}[])
+            push!(vhs, (vid_to, hids[2]))
         end
     end
     show_progress && println()
-
+    
     # completing h2next for boundary halfedge
-    for (vid_from,(vid_to,hid)) in V2VHID_boundary
-        h2next[hid] = V2VHID_boundary[vid_to][2]
+    for (vid_from,vhs) in deepcopy(V2VHs_boundary), (vid_to,hid) in vhs
+        _,hid_next = pop!(V2VHs_boundary[vid_to])
+        h2next[hid] = hid_next
     end
     
     # fill in v2h for unused vertices
@@ -581,34 +602,126 @@ function graphviz(topo::IHTopology;title="",engine="sfdp")
     """ |> clipboard
 end
 
+macro assign_vars_diamond(topo,eid)
+    quote
+        # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
+        h1::HID,h2::HID = _bothhalfedge($eid)
+        h11::HID,h21::HID = @fix1 $topo (next(h1), next(h2))
+        h12::HID,h22::HID = @fix1 $topo (next(h11), next(h21))
+        f1::FID,f2::FID = @fix1 $topo (face(h1), face(h2))
+        v1::VID,v2::VID = @fix1 $topo (vertex(h1), vertex(h2))
+        u1::VID,u2::VID = @fix1 $topo (vertex(h12), vertex(h22))
+    end |> esc
+end
+
+@propagate_inbounds function form_triangle!(topo::IHTopology,f::FID,v1::VID,v2::VID,v3::VID,h1::HID,h2::HID,h3::HID)
+    @unpack h2next,h2v,h2f,v2h,f2h = topo
+    h2next[h1] = h2
+    h2next[h2] = h3
+    h2next[h3] = h1
+    h2v[h1] = v1
+    h2v[h2] = v2
+    h2v[h3] = v3
+    h2f[h1] = h2f[h2] = h2f[h3] = f
+    v2h[v1] = h1
+    v2h[v2] = h2
+    v2h[v3] = h3
+    f2h[f] = h1
+end
+
 function flipedge!(topo::IHTopology{3}, e::EID)
+    @assert e in edgeids(topo)
     @assert !isboundary(topo, e)
     
-    # face f1 is h1->h11->h12, face f2 = h2->h21->h22
-    h1 = _halfedge(e)
-    h2 = _twin(h1)
-    h11,h21 = @fix1 topo (next(h1), next(h2))
-    h12,h22 = @fix1 topo (next(h11), next(h21))
-    f1::FID,f2::FID = @fix1 topo (face(h1), face(h2))
-    v1,v2 = @fix1 topo (vertex(h1), vertex(h2))
+    # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
+    @assign_vars_diamond topo e
     
-    for (h,hnext) in ((h1,h22), (h2,h12), (h11,h1), (h21,h2), (h12,h21), (h22,h11))
-        topo.h2next[h] = hnext
-    end
-    for (h,f) in ((h11,f1), (h22,f1), (h12,f2), (h21,f2))
-        topo.h2f[h] = f
-    end
-    topo.h2v[h1] = vertex(topo, h12)
-    topo.h2v[h2] = vertex(topo, h22)
-    topo.f2h[f1] = h1
-    topo.f2h[f2] = h2
-    topo.v2h[v1] = h21
-    topo.v2h[v2] = h11
+    form_triangle!(topo,f1,u1,u2,v2,h1,h22,h11)
+    form_triangle!(topo,f2,u2,u1,v1,h2,h12,h21)
+    
+    # for (h,hnext) in ((h1,h22), (h2,h12), (h11,h1), (h21,h2), (h12,h21), (h22,h11))
+    #     topo.h2next[h] = hnext
+    # end
+    # for (h,f) in ((h11,f1), (h22,f1), (h12,f2), (h21,f2))
+    #     topo.h2f[h] = f
+    # end
+    # topo.h2v[h1] = vertex(topo, h12)
+    # topo.h2v[h2] = vertex(topo, h22)
+    # topo.f2h[f1] = h1
+    # topo.f2h[f2] = h2
+    # topo.v2h[v1] = h21
+    # topo.v2h[v2] = h11
     return topo
 end
 flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
 
-square = IHTopology{3}([[1,2,3],[1,3,4]])
+_degree_deviation(dv1::Int,dv2::Int,du1::Int,du2::Int) = abs(dv1-6)+abs(dv2-6)+abs(du1-6)+abs(du2-6)
+_should_flip(dv1::Int,dv2::Int,du1::Int,du2::Int) = _degree_deviation(dv1-1,dv2-1,du1+1,du2+1) > _degree_deviation(dv1,dv2,du1,du2)
+
+function should_flip(topo::IHTopology{3},e::EID)
+    h1,h2 = _bothhalfedge(e)
+    v1,v2 = @fix1 topo vertex(h1),vertex(h2)
+    u1,u2 = @fix1 topo headvertex(next(h1)),headvertex(next(h2))
+    dv1,dv2,du1,du2 = @fix1 topo vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
+    return _should_flip(dv1,dv2,du1,du2)
+end
+function improve_vertex_degree!(topo::IHTopology{3}, p::Real; max_checks::Int=nedges(topo))
+    @assert 0 < p <= 1
+    pastflips = CircularBuffer{Bool}(ceil(Int, 2inv(p)))
+    fill!(pastflips, true)
+    nflips = nchecks = 0
+    edges = edgeids(topo)
+    while mean(pastflips) > p && nchecks < max_checks
+        nchecks += 1
+        e = rand(edges)
+        isboundary(topo, e) && continue
+        doflip = should_flip(topo, e)
+        if doflip
+            flipedge!(topo, e)
+            nflips += 1
+        end
+        push!(pastflips, doflip)
+    end
+    @show nflips, nchecks
+    return topo
+end
+    
+
+"""
+    makeroom!(v::Vector, delta::Integer, indextype)
+Grow end of `v` by `delta` and return new indices as a range of type `indextype`
+"""
+function makeroom!(v::Vector, delta::Integer, indextype::Type{IT}) where IT<:Integer
+    lv = length(v)
+    Base._growend!(v, delta)
+    return IT(lv+1):IT(lv+delta)
+end
+
+function splitedge!(topo::IHTopology{3}, e::EID)
+    @assert e in edgeids(topo)
+    @assert !isboundary(topo, e)
+    
+    # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
+    @assign_vars_diamond topo e
+    
+    # making room in topo interal storage, assigning handles for new objects
+    @unpack h2next,h2v,h2f,v2h,f2h = topo
+    h1_,h2_,w1,w1_,w2,w2_ = makeroom!(h2next, 6, HID)
+    Base._growend!(h2v, 6)
+    Base._growend!(h2f, 6)
+    v, = makeroom!(v2h, 1, VID)
+    f1_,f2_ = makeroom!(f2h, 2, FID)
+    
+    form_triangle!(topo,f1,v1,v,u1,h1,w1,h12)
+    form_triangle!(topo,f2,v2,v,u2,h2_,w2,h22)
+    form_triangle!(topo,f1_,v,v2,u1,h1_,h11,w1_)
+    form_triangle!(topo,f2_,v,v1,u2,h2,h21,w2_)
+    
+    return v
+end
+splitedge!(topo::IHTopology{3}, h::HID) = splitedge!(topo, _edge(h))
+
+topo_square = IHTopology{3}([[1,2,3],[1,3,4]])
 # graphviz(square,"circo")
 # flipedge!(square,find_edge(square,VID(1),VID(3)))
 

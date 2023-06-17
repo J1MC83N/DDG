@@ -1,5 +1,5 @@
 include("halfedges.jl")
-using LinearAlgebra, SparseArrays, LinearSolve
+using LinearAlgebra, SparseArrays, LinearSolve, DataStructures
 
 const ImplicitHalfEdgeMesh{Dim,T,V<:AbstractVector{Point{Dim,T}},N} = SimpleMesh{Dim,T,V,ImplicitHalfEdgeTopology{N}}
 const IHMesh = ImplicitHalfEdgeMesh
@@ -8,23 +8,15 @@ const IHTriMesh = IHMeshN{3}
 IHMesh(P::V, topo::IHTopology{N}) where {Dim,T,V<:AbstractVector{Point{Dim,T}},N} = IHMesh{Dim,T,V,N}(P,topo)
 IHTriMesh(P::V, topo::IHTopology{3}) where {Dim,T,V<:AbstractVector{Point{Dim,T}}} = IHTriMesh{Dim,T,V}(P,topo)
 
-facedegree(mesh::Mesh) = facedegree(mesh.topology)
-Base.convert(::Type{M}, mesh::M) where M<:IHMesh = mesh
-Base.convert(::Type{IHMesh}, mesh::Mesh) = IHMesh(vertices(mesh),convert(IHTopology,topology(mesh)))
-Base.convert(::Type{IHMeshN{N}}, mesh::Mesh) where N = IHMeshN{N}(vertices(mesh),convert(IHTopology{N},topology(mesh)))
+facedegree(mesh::Mesh) = facedegree(topology(mesh))
+# Base.convert(::Type{M}, mesh::M) where M<:IHMesh = mesh
+# Base.convert(::Type{IHMesh}, mesh::Mesh) = IHMesh(vertices(mesh),convert(IHTopology,topology(mesh)))
+# Base.convert(::Type{IHMeshN{N}}, mesh::Mesh) where N = IHMeshN{N}(vertices(mesh),convert(IHTopology{N},topology(mesh)))
 
-for f in [:nfaces, :nhalfedges, :nhvf, :nedges, :vertexids, :halfedgeids, :faceids, :edgeids]
+for f in [:nfaces, :nhalfedges, :nhvf, :nedges, :vertexids, :halfedgeids, :faceids, :edgeids, :validate_topology]
     @eval $f(mesh::IHMesh) = $f(topology(mesh))
 end
 
-# nfaces(mesh::IHMesh) = nfaces(topology(mesh))
-# nhalfedges(mesh::IHMesh) = nhalfedges(topology(mesh)) 
-# nhvf(mesh::IHMesh) = nhvf(topology(mesh))
-# nedges(mesh::IHMesh) = nedges(topology(mesh))
-
-# vertexids(mesh::IHMesh) = vertexids(mesh.topology)
-# halfedgeids(mesh::IHMesh) = halfedgeids(mesh.topology)
-# faceids(mesh::IHMesh) = faceids(mesh.topology)
 for (f, T) in [(:next,HID),(:next,CID),
                (:prev,HID),
                (:twin,HID),
@@ -32,22 +24,11 @@ for (f, T) in [(:next,HID),(:next,CID),
                (:headvertex,HID),
                (:face,HID),(:face,CID),
                (:halfedge,VID),(:halfedge,FID),(:halfedge,CID),(:halfedge,EID),
-               (:edge,HID),(:edge,VID),(:edge,FID)]
+               (:edge,HID),(:edge,VID),(:edge,FID),
+               (:bothvertex,EID),
+               (:bothedge,EID)]
     @eval @propagate_inbounds $f(mesh::IHMesh, id::$T) = $f(topology(mesh),id)
 end
-
-# @propagate_inbounds next(mesh::IHMesh, hid::HID) = next(topology(mesh),hid)
-# twin(::IHMesh, hid::HID) = hidtwin(hid)
-# @propagate_inbounds prev(mesh::IHMesh, hid::HID) = prev(topology(mesh),hid)
-# @propagate_inbounds vertex(mesh::IHMesh, hid::HID) = vertex(topology(mesh),hid)
-# @propagate_inbounds headvertex(mesh::IHMesh, hid::HID) = headvertex(topology(mesh),hid)
-# @propagate_inbounds face(mesh::IHMesh, hid::HID) = face(topology(mesh),hid)
-# @propagate_inbounds halfedge(mesh::IHMesh, vid::VID) = halfedge(topology(mesh),vid)
-# @propagate_inbounds halfedge(mesh::IHMesh, fid::FID) = halfedge(topology(mesh),fid)
-# @propagate_inbounds halfedge(::IHMesh, cid::CID) = HID(cid)
-# @propagate_inbounds next(mesh::IHMesh, cid::CID) = next(topology(mesh),cid)
-# @propagate_inbounds vertex(mesh::IHMesh, cid::CID) = vertex(topology(mesh),cid)
-# @propagate_inbounds face(mesh::IHMesh,cid::CID) = face(topology(mesh),cid)
 
 @fix1able @propagate_inbounds topoint(mesh::IHMesh, v::VID) = vertices(mesh)[v]
 @fix1able @propagate_inbounds tovec(mesh::IHMesh, h::HID) = @fix1 mesh topoint(headvertex(h)) - topoint(vertex(h))
@@ -55,6 +36,8 @@ end
 @propagate_inbounds toface(mesh::IHMesh, f::FID) = mesh[f]
 @propagate_inbounds toface(mesh::IHMesh, h::HID) = mesh[face(mesh,h)]
 
+
+###################################### OBJ read ##############################################
 
 using FastOBJ
 function obj_read(filename::AbstractString)
@@ -95,27 +78,30 @@ end
 for VXIterator in [:VHIterator, :VVIterator, :VFIterator, :VIFIterator, :VCIterator, :VICIterator]
     @eval $VXIterator(mesh::IHMesh, v::VID) = $VXIterator(topology(mesh),v)
 end
+vertexdegree(mesh::IHMesh,vid::VID) = vertexdegree(topology(mesh),vid)
 for FXIterator in [:FHIterator, :FVIterator, :FFIterator, :FIFIterator, :FCIterator]
     @eval $FXIterator(mesh::IHMesh, f::FID) = $FXIterator(topology(mesh),f)
 end
 
 import Meshes: element
 function element(mesh::IHMesh{Dim,T,V,0},f::Integer) where {Dim,T,V}
-    P = [mesh.vertices[vid] for vid in FVIterator(mesh,FID(f))]
+    P = [vertices(mesh)[vid] for vid in FVIterator(mesh,FID(f))]
     Ngon{length(P),Dim,T,Vector{Point{Dim,T}}}
 end
 function element(mesh::IHMesh{Dim,T,V,N},f::Integer) where {Dim,T,V,N}
-    Ngon{N,Dim,T,Vector{Point{Dim,T}}}([mesh.vertices[vid] for vid in FVIterator(mesh,FID(f))])
+    Ngon{N,Dim,T,Vector{Point{Dim,T}}}([vertices(mesh)[vid] for vid in FVIterator(mesh,FID(f))])
 end
 
 isboundary(mesh::IHMesh, id::Handle) = isboundary(topology(mesh),id)
+find_edge(mesh::IHMesh,v1::Integer,v2::Integer) = find_edge(topology(mesh),v1,v2)
+find_halfedge(mesh::IHMesh,v1::Integer,v2::Integer) = find_halfedge(topology(mesh),v1,v2)
 
-
+graphviz(mesh::IHMesh; title="", engine="sfdp") = graphviz(topology(mesh); title, engine)
 
 center_of_mass(positions::AbstractArray{<:Point}) = sum(coordinates,positions)/length(positions)
-center_of_mass(mesh::IHMesh) = center_of_mass(mesh.vertices)
+center_of_mass(mesh::IHMesh) = center_of_mass(vertices(mesh))
 function normalize!(mesh::IHMesh{Dim,T}; rescale::Bool=true) where {Dim,T}
-    positions = mesh.vertices
+    positions = vertices(mesh)
     com = center_of_mass(positions)
     
     radius = zero(T)
@@ -180,7 +166,8 @@ function circumcentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T}
 end
 
 abstract type VertexNormalMethod end
-vertex_normal(mesh::Mesh, v::VID; method::VertexNormalMethod) = normalize(sum(vn_fun_iter(mesh,v,method)...))
+vertex_normal(mesh::Mesh, v::VID, method::VertexNormalMethod) = normalize(sum(vn_fun_iter(mesh,v,method)...))
+vertex_normal_scaled(mesh::Mesh, v::VID, method::VertexNormalMethod) = sum(vn_fun_iter(mesh,v,method)...)
 
 struct EquallyWeighted <: VertexNormalMethod end
 vn_fun_iter(mesh::Mesh, v::VID, ::EquallyWeighted) = (f::FID->normal(mesh,f), VIFIterator(mesh, v))
@@ -205,12 +192,75 @@ function vn_fun_iter(mesh::Mesh, v::VID, ::MeanCurvature)
     (fun, VHIterator(mesh, v))
 end
 
-################################ Mesh modification ##################################
-flipedge!(mesh::Mesh, e::EID) = flipedge!(mesh.topology,e)
-flipedge!(mesh::Mesh, h::HID) = flipedge!(mesh.topology,h)
+################################ Mesh improvements ##################################
+flipedge!(mesh::Mesh, e::EID) = flipedge!(topology(mesh),e)
+flipedge!(mesh::Mesh, h::HID) = flipedge!(topology(mesh),h)
 
+improve_vertex_degree!(mesh::Mesh, p::Real; max_checks::Int=nedges(mesh)) = improve_vertex_degree!(topology(mesh),p;max_checks)
 
+function isdelaunay(mesh::IHTriMesh{Dim,T},e::EID) where {Dim,T}
+    h1,h2 = _bothhalfedge(e)
+    totalangle = @fix1 mesh ∠(opp_corner(h1))+∠(opp_corner(h2))
+    return totalangle <= π + √eps(T)
+end
+isdelaunay(mesh::IHTriMesh,h::HID) = isdelaunay(mesh,_edge(h))
 
+function improve_delaunay!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh))
+    @assert 0 < p <= 1
+    pastflips = CircularBuffer{Bool}(ceil(Int, 2inv(p)))
+    fill!(pastflips, true)
+    nflips = nchecks = 0
+    edges = edgeids(mesh)
+    while mean(pastflips) > p && nchecks < max_checks
+        nchecks += 1
+        e = rand(edges)
+        isboundary(mesh, e) && continue
+        doflip = !isdelaunay(mesh, e)
+        if doflip
+            flipedge!(mesh, e)
+            nflips += 1
+        end
+        push!(pastflips,doflip)
+    end
+    @show nflips, nchecks
+    return mesh
+end
+
+midpoint(p1::Point{Dim},p2::Point{Dim}) where Dim = Point((coordinates(p1)+coordinates(p2))/2)
+@propagate_inbounds midpoint(mesh::IHMesh,v1::VID,v2::VID) = midpoint(vertices(mesh)[v1], vertices(mesh)[v2])
+function splitedge!(mesh::IHTriMesh, e::EID)
+    v1,v2 = bothvertex(mesh,e)
+    v = splitedge!(topology(mesh), e)
+    push!(vertices(mesh),midpoint(mesh,v1,v2))
+    return mesh
+end
+
+function vertex_neighbor_centers(mesh::IHMesh{Dim,T}) where {Dim,T}
+    points = vertices(mesh)
+    centers = Vector{Vec{Dim,T}}(undef,nvertices(mesh))
+    @forlorn for vid in vertexids(mesh)
+        center = zero(Vec{Dim,T})
+        degree = 0
+        @forlorn for vid_ in VVIterator(mesh,vid)
+            degree += 1
+            center += coordinates(points[vid_])
+        end
+        centers[vid] = center/degree
+    end
+    return centers
+end
+function center_vertices!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
+    points = vertices(mesh)
+    P = reinterpret(reshape,T,points) # 3×nv matrix
+    PL = P*transpose(laplacematrix(mesh)) # 3×nv matrix
+    normals = normalize.(reinterpret(reshape,Vec{Dim,T},PL))
+    centers = vertex_neighbor_centers(mesh)
+    for vid in vertexids(mesh)
+        n,c,p = normals[vid],centers[vid],coordinates(points[vid])
+        points[vid] = Point{Dim,T}(c-dot(c-p,n)*n)
+    end
+    return mesh
+end
 
 ######################## Mean Curvature Flow #################################
 
@@ -239,41 +289,43 @@ function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
     return out
 end
 
-# solves, APₕ = MP₀, where A = M(I-h*Δ) = M+h*L, L=-MΔ
-function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real) where {Dim,T}
+# solves APₕ = MP₀ via backward Euler, where A = M(I-h*Δ) = M+h*L, L=-MΔ
+function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=eps(T)), solver::Union{Nothing,LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
     @assert Dim > 2
     h = convert(T, h)
-    vertices = mesh.vertices
-    M,L = massmatrix(mesh), laplacematrix(mesh, shift=eps(T))
+    vertices = vertices(mesh)
+    M = massmatrix(mesh)
     A = M+h*L
     P0_dims = splitbydim(vertices)
     
     # solving
     Ph_dims = Vector{Vector{T}}(undef,Dim)
     prob = LinearProblem(A,M*P0_dims[1])
-    linsolve = init(prob,KrylovJL_CG());
+    linsolve = init(prob,solver);
     Ph_dims[1] = solve!(linsolve)
     for dim in 2:Dim
         linsolve.b = M*P0_dims[dim]
         Ph_dims[dim] = solve!(linsolve)
     end
-    
     # updating vertex positions
     @inbounds for vid in vertexids(mesh)
         point = Point{Dim,T}([Ph_dims[dim][vid] for dim in 1:Dim])
         vertices[vid] = point
     end
-    
     return mesh
 end
 
 
 using Profile, PProf, BenchmarkTools
-topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]])
-pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
+topo_square = IHTopology{3}([[1,2,3],[1,3,4]])
+square = IHTriMesh(Meshes.Point2[(0,0),(0,1),(1,1),(1,0)],topo_square)
+topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]]);
+pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid);
 pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
+gourd = IHMesh("test-obj/gourd.obj")
 mesh = trumpet = IHMesh("test-obj/trumpet.obj")
 ear = IHMesh("test-obj/ear.obj")
+coin = IHMesh("test-obj/coin.obj")
 arrowhead = IHMesh("test-obj/arrowhead.obj")
 # dragon = IHMesh("test-obj/dragon.obj")
 
@@ -281,17 +333,27 @@ arrowhead = IHMesh("test-obj/arrowhead.obj")
 # pprof()
 
 using GLMakie
-using Revise
 using MeshViz
-GLMakie.Makie.inline!(true)
+GLMakie.Makie.inline!(false)
+include("meshviz_mod.jl")
 
-grid = convert(IHMeshN{3}, refine(CartesianGrid(4,4), TriRefinement()))
-for i in 1:30
-    e = rand(1:nedges(grid))|>EID
-    isboundary(grid, e) && continue
-    flipedge!(grid,e)
-    display(viz(grid,showfacets=true))
-end
+
+# flipedge!(square,find_edge(square,VID(2),VID(4)))
+# splitedge!(square,find_edge(square,1,3))
+# center_vertices!(deepcopy(pyramid))
+# for i in 1:100; center_vertices!(ear) end
+coin = IHMesh("test-obj/coin.obj")
+for i in 1:20; center_vertices!(coin); end
+improve_vertex_degree!(coin,0.3);
+for i in 1:20; center_vertices!(coin); end
+improve_delaunay!(coin,0.005);
+for i in 1:20; center_vertices!(coin); end
+viz(coin,showfacets=true)
+
+
+
+@time mean_curvature_flow!(ear,0.01,solver=KrylovJL());
+viz(coin,showfacets=true)
 
 # enable_timer!(to)
 # _mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
