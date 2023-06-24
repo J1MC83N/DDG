@@ -18,20 +18,27 @@ for f in [:nfaces, :nhalfedges, :nhvf, :nedges, :vertexids, :halfedgeids, :facei
 end
 
 for (f, T) in [(:next,HID),(:next,CID),
-               (:prev,HID),
+               (:prev_global,HID),(:prev_loop,HID),(:prev_interior_loop,HID),
                (:twin,HID),
-               (:vertex,HID),(:vertex,CID),
-               (:headvertex,HID),
+               (:vertex,HID),(:vertex,CID),(:headvertex,HID),
                (:face,HID),(:face,CID),
                (:halfedge,VID),(:halfedge,FID),(:halfedge,CID),(:halfedge,EID),
                (:edge,HID),(:edge,VID),(:edge,FID),
-               (:bothvertex,EID),
-               (:bothedge,EID)]
+               (:bothvertex,EID),(:bothedge,EID),(:bothface,EID)]
     @eval @propagate_inbounds $f(mesh::IHMesh, id::$T) = $f(topology(mesh),id)
 end
 
+macro fix1mesh(ex)
+    _fix1(:mesh,ex)
+end
+
 @fix1able @propagate_inbounds topoint(mesh::IHMesh, v::VID) = vertices(mesh)[v]
-@fix1able @propagate_inbounds tovec(mesh::IHMesh, h::HID) = @fix1 mesh topoint(headvertex(h)) - topoint(vertex(h))
+@fix1able @propagate_inbounds tovec(mesh::IHMesh, h::HID) = @fix1mesh topoint(headvertex(h)) - topoint(vertex(h))
+@fix1able @propagate_inbounds function tovec(mesh::IHMesh, e::EID)
+    h1,h2 = _bothhalfedge(e)
+    return @fix1mesh topoint(vertex(h1)) - topoint(vertex(h2))
+end
+@fix1able @propagate_inbounds edgelength(mesh::IHMesh, e::EID) = norm(tovec(mesh,e))
 
 @propagate_inbounds toface(mesh::IHMesh, f::FID) = mesh[f]
 @propagate_inbounds toface(mesh::IHMesh, h::HID) = mesh[face(mesh,h)]
@@ -83,13 +90,14 @@ for FXIterator in [:FHIterator, :FVIterator, :FFIterator, :FIFIterator, :FCItera
     @eval $FXIterator(mesh::IHMesh, f::FID) = $FXIterator(topology(mesh),f)
 end
 
+
 import Meshes: element
 function element(mesh::IHMesh{Dim,T,V,0},f::Integer) where {Dim,T,V}
     P = [vertices(mesh)[vid] for vid in FVIterator(mesh,FID(f))]
     Ngon{length(P),Dim,T,Vector{Point{Dim,T}}}
 end
 function element(mesh::IHMesh{Dim,T,V,N},f::Integer) where {Dim,T,V,N}
-    Ngon{N,Dim,T,Vector{Point{Dim,T}}}([vertices(mesh)[vid] for vid in FVIterator(mesh,FID(f))])
+    Ngon{N,Dim,T,SVector{N,Point{Dim,T}}}(SVector{3}(vertices(mesh)[vid] for vid in FVIterator(mesh,FID(f))))
 end
 
 isboundary(mesh::IHMesh, id::Handle) = isboundary(topology(mesh),id)
@@ -119,39 +127,53 @@ function normalize!(mesh::IHMesh{Dim,T}; rescale::Bool=true) where {Dim,T}
 end
 
 import Meshes: ∠
-@fix1able ∠(mesh::IHMesh, c::CID) = @fix1 mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
+@fix1able ∠(mesh::IHMesh, c::CID) = @fix1mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
 
 _cotan(v1::T, v2::T) where T<:Vec = dot(v1,v2)/norm(cross(v1,v2))
-@fix1able cotan(mesh::IHTriMesh, c::CID) = @fix1 mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
+@fix1able cotan(mesh::IHTriMesh, c::CID) = @fix1mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
 @fix1able unsafe_opp_corner(mesh::IHTriMesh,h::HID) = unsafe_opp_corner(topology(mesh),h)
 @fix1able opp_corner(mesh::IHTriMesh,h::HID) = opp_corner(topology(mesh),h)
 @fix1able unsafe_opp_halfedge(mesh::IHTriMesh,c::CID) = unsafe_opp_halfedge(topology(mesh),c)
 @fix1able opp_halfedge(mesh::IHTriMesh,c::CID) = opp_halfedge(topology(mesh),c)
 
 
-dihedral_angle(::IHMesh{2,T}, ::HID) where T = zero(T)
-function dihedral_angle(mesh::IHMesh{Dim,T}, h::HID) where {Dim,T}
-    (isboundary(mesh,h) || isboundary(mesh,twin(mesh,h))) && return zero(T)
-    # adjacent face normals
-    n1,n2 = normal.((toface(mesh,h), toface(mesh,twin(mesh,h))))
-    # unit vector given halfedge
-    vh = normalize(tovec(mesh,h))
-    cosθ = dot(n1,n2)
-    sinθ = dot(cross(n1,n2),vh)
-    return atan(sinθ,cosθ)
-end
-
 import Meshes: area, normal
 Meshes.area(mesh::IHMesh, f::FID) = area(mesh[f])
 Meshes.normal(mesh::IHMesh, f::FID) = normal(mesh[f])
 
+dihedral_angle(mesh::IHMesh, h::HID) = dihedral_angle(mesh,_edge(h))
+dihedral_angle(::IHMesh{2,T}, ::EID) where T = zero(T)
+function dihedral_angle(mesh::IHMesh{3,T}, e::EID) where T
+    # convension: flat mesh is 0, complete fold is ±π
+    isboundary(mesh,e) && return zero(T)
+    # adjacent face normals
+    h1,h2 = _bothhalfedge(e)
+    n1,n2 = normal(toface(mesh,h1)), normal(toface(mesh,h2))
+    # unit vector given halfedge
+    ve = normalize(tovec(mesh,h1))
+    cosθ = dot(n1,n2)
+    sinθ = dot(cross(n1,n2),ve)
+    return atan(sinθ,cosθ)
+end
+function _dihedral_angle_diamond(pv1::P,pv2::P,pu1::P,pu2::P) where {T,P<:Point{3,T}}
+    n1,n2 = normal(Triangle(pv1,pv2,pu1)), normal(Triangle(pv1,pv2,pu2))
+    # unit vector given halfedge
+    ve = normalize(pv2-pv1)
+    cosθ = dot(n1,n2)
+    sinθ = dot(cross(n1,n2),ve)
+    return atan(sinθ,cosθ)
+end
+function dihedral_angle_diamond(mesh::IHMesh{3},v1::VID,v2::VID,u1::VID,u2::VID)
+    pv1,pv2,pu1,pu2 = getindex(vertices(mesh),SA[v1,v2,u1,u2])
+    _dihedral_angle_diamond(pv1,pv2,pu1,pu2)
+end
 
 barycentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T} = sum(f->area(mesh,f), VIFIterator(mesh,v))/3
 
 function cotan_sum(mesh::IHTriMesh{Dim,T}, h::HID) where {Dim,T}
     s = zero(T)
     for _h in (h, twin(mesh,h))
-        _cotan = isnothing(face(mesh, _h)) ? zero(T) : @fix1 mesh cotan(opp_corner(_h))
+        _cotan = isnothing(face(mesh, _h)) ? zero(T) : @fix1mesh cotan(opp_corner(_h))
         s += _cotan
     end
     return s
@@ -192,75 +214,7 @@ function vn_fun_iter(mesh::Mesh, v::VID, ::MeanCurvature)
     (fun, VHIterator(mesh, v))
 end
 
-################################ Mesh improvements ##################################
-flipedge!(mesh::Mesh, e::EID) = flipedge!(topology(mesh),e)
-flipedge!(mesh::Mesh, h::HID) = flipedge!(topology(mesh),h)
 
-improve_vertex_degree!(mesh::Mesh, p::Real; max_checks::Int=nedges(mesh)) = improve_vertex_degree!(topology(mesh),p;max_checks)
-
-function isdelaunay(mesh::IHTriMesh{Dim,T},e::EID) where {Dim,T}
-    h1,h2 = _bothhalfedge(e)
-    totalangle = @fix1 mesh ∠(opp_corner(h1))+∠(opp_corner(h2))
-    return totalangle <= π + √eps(T)
-end
-isdelaunay(mesh::IHTriMesh,h::HID) = isdelaunay(mesh,_edge(h))
-
-function improve_delaunay!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh))
-    @assert 0 < p <= 1
-    pastflips = CircularBuffer{Bool}(ceil(Int, 2inv(p)))
-    fill!(pastflips, true)
-    nflips = nchecks = 0
-    edges = edgeids(mesh)
-    while mean(pastflips) > p && nchecks < max_checks
-        nchecks += 1
-        e = rand(edges)
-        isboundary(mesh, e) && continue
-        doflip = !isdelaunay(mesh, e)
-        if doflip
-            flipedge!(mesh, e)
-            nflips += 1
-        end
-        push!(pastflips,doflip)
-    end
-    @show nflips, nchecks
-    return mesh
-end
-
-midpoint(p1::Point{Dim},p2::Point{Dim}) where Dim = Point((coordinates(p1)+coordinates(p2))/2)
-@propagate_inbounds midpoint(mesh::IHMesh,v1::VID,v2::VID) = midpoint(vertices(mesh)[v1], vertices(mesh)[v2])
-function splitedge!(mesh::IHTriMesh, e::EID)
-    v1,v2 = bothvertex(mesh,e)
-    v = splitedge!(topology(mesh), e)
-    push!(vertices(mesh),midpoint(mesh,v1,v2))
-    return mesh
-end
-
-function vertex_neighbor_centers(mesh::IHMesh{Dim,T}) where {Dim,T}
-    points = vertices(mesh)
-    centers = Vector{Vec{Dim,T}}(undef,nvertices(mesh))
-    @forlorn for vid in vertexids(mesh)
-        center = zero(Vec{Dim,T})
-        degree = 0
-        @forlorn for vid_ in VVIterator(mesh,vid)
-            degree += 1
-            center += coordinates(points[vid_])
-        end
-        centers[vid] = center/degree
-    end
-    return centers
-end
-function center_vertices!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
-    points = vertices(mesh)
-    P = reinterpret(reshape,T,points) # 3×nv matrix
-    PL = P*transpose(laplacematrix(mesh)) # 3×nv matrix
-    normals = normalize.(reinterpret(reshape,Vec{Dim,T},PL))
-    centers = vertex_neighbor_centers(mesh)
-    for vid in vertexids(mesh)
-        n,c,p = normals[vid],centers[vid],coordinates(points[vid])
-        points[vid] = Point{Dim,T}(c-dot(c-p,n)*n)
-    end
-    return mesh
-end
 
 ######################## Mean Curvature Flow #################################
 
@@ -316,7 +270,6 @@ function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix
 end
 
 
-using Profile, PProf, BenchmarkTools
 topo_square = IHTopology{3}([[1,2,3],[1,3,4]])
 square = IHTriMesh(Meshes.Point2[(0,0),(0,1),(1,1),(1,0)],topo_square)
 topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]]);
@@ -338,22 +291,10 @@ GLMakie.Makie.inline!(false)
 include("meshviz_mod.jl")
 
 
-# flipedge!(square,find_edge(square,VID(2),VID(4)))
-# splitedge!(square,find_edge(square,1,3))
-# center_vertices!(deepcopy(pyramid))
-# for i in 1:100; center_vertices!(ear) end
-coin = IHMesh("test-obj/coin.obj")
-for i in 1:20; center_vertices!(coin); end
-improve_vertex_degree!(coin,0.3);
-for i in 1:20; center_vertices!(coin); end
-improve_delaunay!(coin,0.005);
-for i in 1:20; center_vertices!(coin); end
-viz(coin,showfacets=true)
 
 
-
-@time mean_curvature_flow!(ear,0.01,solver=KrylovJL());
-viz(coin,showfacets=true)
+# @time mean_curvature_flow!(ear,0.01,solver=KrylovJL());
+# viz(mesh,showfacets=true)
 
 # enable_timer!(to)
 # _mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)

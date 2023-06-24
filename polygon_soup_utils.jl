@@ -112,7 +112,7 @@ function col_find_N(::Val{N}, mat::Matrix{I}, maxind::TMI, col::I, needle::I) wh
             @inbounds (index > maxind || mat[index,col] == needle) && return index
             index += one(TMI)
         end
-        return Expr(:block, :(index = one(TMI)), ntuple(_->block, N)...)
+        return Expr(:block, :(index = one(TMI)), ntuple(_->block, Val(N))...)
     else
         for index = one(TMI):maxind
             mat[index, col] == needle && return index
@@ -340,11 +340,16 @@ Thin wrapper around `IntSet` from DataStructures that supports arbitrary Unsigne
 struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
     data::IntSet
     UnsignedSet{T}(data::IntSet) where T<:Unsigned = new{T}(data)
+    function UnsignedSet{T}(sizehint::Integer) where T<:Unsigned
+        data = IntSet()
+        sizehint!(data, sizehint)
+        new{T}(data)
+    end
 end
 UnsignedSet{T}(itr) where T = UnsignedSet{T}(IntSet(itr))
 UnsignedSet{T}() where T = UnsignedSet{T}(IntSet())
 
-import Base: first, last, iterate, length, in, sizehint!, empty!, delete!, push!
+import Base: first, last, iterate, length, in, sizehint!, empty!, delete!, push!, issorted
 first(s::UnsignedSet{T}) where T = T(first(s.data))
 last(s::UnsignedSet{T}) where T = T(last(s.data))
 function iterate(s::UnsignedSet{T}) where T
@@ -360,6 +365,7 @@ function iterate(s::UnsignedSet{T},state) where T
     return T(val),state
 end
 length(s::UnsignedSet) = length(s.data)
+issorted(::UnsignedSet) = true
 in(val::Integer,s::UnsignedSet) = val in s.data
 sizehint!(s::UnsignedSet, n::Integer) = (sizehint!(s.data, n); s)
 empty!(s::UnsignedSet) = (empty!(s.data); s)
@@ -368,6 +374,12 @@ push!(s::UnsignedSet, n::Integer) = (push!(s.data, n); s)
 push!(s::IntSet, ns::Integer...) = (push!(s.data, ns...); s)
 findnextelem(s::IntSet, i::Int, invert::Bool=false) = findnextidx(s,i+1,invert)-1
 findnextelem(s::UnsignedSet{T}, i::Int, invert::Bool=false) where T = T(findnextelem(s,i,invert))
+function hasintersection(s::UnsignedSet{T}, itr) where T
+    for element::Integer in itr
+        element in s && return true
+    end
+    return false
+end
 
 
 struct UnsignedDict{K<:Unsigned,V} <: AbstractDict{K,V}

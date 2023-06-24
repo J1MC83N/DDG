@@ -103,7 +103,6 @@ import Base: @propagate_inbounds
 @propagate_inbounds next(topo::IHTopology,hid::HID) = topo.h2next[hid]
 _twin(id::HID) = HID(((id-1)⊻1)+1)
 twin(::IHTopology,hid::HID) = _twin(hid)
-prev(topo::IHTopology,hid::HID) = findfirst(==(hid),topo.h2next)
 @propagate_inbounds vertex(topo::IHTopology,hid::HID) = topo.h2v[hid]
 @propagate_inbounds headvertex(topo::IHTopology,hid::HID) = vertex(topo,next(topo,hid))
 @propagate_inbounds face(topo::IHTopology,hid::HID) = topo.h2f[hid]
@@ -124,7 +123,32 @@ end
     return hid, hid+1
 end
 @propagate_inbounds bothhalfedge(::IHTopology,eid::EID) = _bothhalfedge(eid)
+@propagate_inbounds function bothface(topo::IHTopology,eid::EID)
+    h1,h2 = _bothhalfedge(eid)
+    return face(topo,h1), face(topo,h2)
+end
 
+prev_global(topo::IHTopology,hid::HID) = findfirst(==(hid),topo.h2next)
+function prev_loop(topo::IHTopology,hid0::HID)
+    hid,hid_next = hid0,next(topo,hid0)
+    while hid_next != hid0
+        hid,hid_next = hid_next,next(topo,hid_next)
+    end
+    return hid
+end
+prev_interior_loop(topo::IHTopology{0},hid::HID) = prev_loop(topo, hid)
+@propagate_inbounds function prev_interior_loop(topo::IHTopology{N},hid::HID) where N
+    if @generated
+        Expr(:block, ntuple(_ -> :(hid=next(topo,hid)), Val(N-1))...)
+    else
+        for i in 1:N-1
+            hid=next(topo,hid)
+        end
+        hid
+    end
+end
+
+    
 # the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
 halfedge(::IHTopology,cid::CID) = HID(cid)
 @propagate_inbounds next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
@@ -148,8 +172,8 @@ end
 
 Convenience macro for fixing the first argument `fixed_arg` for all whitelisted function calls in `expr`. Used only for the convenience methods for getting around an IHTopology; whitelist represented by the global constant `_FIX1_METHODS`, which currently consists of `next`, `twin`, `prev`, `vertex`, `headvertex`, `face`, and `halfedge`.
 
-For instance, `@fix1 topo next(h)` is equivalent to `next(topo, h)`. 
-Also supports chaining: `@fix1 topo h |> next |> face` is equivalent to `face(topo, next(topo, h))`.
+For instance, `@fix1topo next(h)` is equivalent to `next(topo, h)`. 
+Also supports chaining: `@fix1topo h |> next |> face` is equivalent to `face(topo, next(topo, h))`.
 """
 macro fix1(fixed,ex)
     _fix1(fixed,ex)
@@ -165,19 +189,21 @@ function _fix1(fixed,ex::Expr)
         else
             Expr(:call, [_fix1(fixed,arg) for arg in ex.args]...)
         end
-    elseif ex.head in [:ref, :tuple, :vect]
+    elseif ex.head in [:ref, :tuple, :vect, :if, :&&, :||]
         Expr(ex.head, [_fix1(fixed,arg) for arg in ex.args]...)
     else
         ex
     end
 end
 _fix1(fixed,ex) = esc(ex)
-
-const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge, :edge, :bothvertex])
+macro fix1topo(ex)
+    _fix1(:topo,ex)
+end
+    
+const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge, :edge, :bothvertex, :prev_global, :prev_loop, :prev_interior_loop])
 _addtofix1!(fs::Union{Function,Symbol}...) = push!(_FIX1_METHODS,Symbol.(fs)...)
 
 using MyMacros
-
 function _fix1able(fdef)
     @assert isa(fdef, Expr)
     if fdef.head === :macrocall
@@ -230,13 +256,12 @@ Base.eltype(::VHIterator) = HID
 
 function Base.iterate(iter::VHIterator)
     @unpack topo,h_start = iter
-    return (h_start, @fix1 topo next(twin(h_start)))
+    return (h_start, @fix1topo next(twin(h_start)))
 end
 function Base.iterate(iter::VHIterator, h::HID)
     @unpack topo,h_start = iter
-    # yield()
     h_start == h && return nothing
-    return (h, @fix1 topo next(twin(h)))
+    return (h, @fix1topo next(twin(h)))
 end
 
 
@@ -253,12 +278,33 @@ VCIterator(topo::IHTopology,v::VID) = imap(h->CID(twin(topo,h)),VHIterator(topo,
 """Constructs an iterator over all adjacent (internal) corners of a vertex."""
 VICIterator(topo::IHTopology, v::VID) = (CID(twin(topo,h)) for h in VHIterator(topo,v) if !isnothing(face(topo,h)))
 
+const VH_MAX_DEGREE = typemax(UInt8)
+mutable struct VHIterator_Tracked
+    const topo::IHTopology
+    const h_start::HID
+    degree::UInt8
+    VHIterator_Tracked(topo::IHTopology,v::VID) = new(topo,halfedge(topo,v),zero(UInt8))
+end
+
+Base.IteratorSize(::Type{VHIterator_Tracked}) = Base.SizeUnknown()
+Base.eltype(::VHIterator_Tracked) = HID
+
+function Base.iterate(iter::VHIterator_Tracked)
+    @unpack topo,h_start = iter
+    iter.degree += one(UInt8)
+    return (h_start, @fix1topo next(twin(h_start)))
+end
+function Base.iterate(iter::VHIterator_Tracked, h::HID)
+    @unpack topo,h_start = iter
+    (iter.degree += one(UInt8)) >= VH_MAX_DEGREE && return nothing
+    h_start == h && return nothing
+    return (h, @fix1topo next(twin(h)))
+end
+
 @fix1able function vertexdegree(topo::IHTopology,vid::VID)
-    d = 0
-    for h in VHIterator(topo,vid)
-        d += 1
-    end
-    d
+    iter = VHIterator_Tracked(topo,vid)
+    for h in iter; end
+    Int(iter.degree)
 end
 
 """Iterator over all halfedges of a face."""
@@ -297,7 +343,7 @@ FCIterator(topo::IHTopology{N}, f::FID) where N = imap(CID,FHIterator{N}(topo,f)
 
 @fix1able isboundary
 isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
-isboundary(topo::IHTopology, e::EID) = @fix1 topo isboundary(_halfedge(e)) | isboundary(twin(_halfedge(e)))
+isboundary(topo::IHTopology, e::EID) = @fix1topo isboundary(_halfedge(e)) | isboundary(twin(_halfedge(e)))
 isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
 isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
 
@@ -314,7 +360,7 @@ element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))
 element(topo::IHTopology{N}, f::Integer) where N = Connectivity{Ngon{N},N}(Tuple(FVIterator(topo,FID(f))))
 function facet(topo::IHTopology, e::Integer)
     h = HID(2*e-1)
-    connect(@fix1 topo (vertex(h), headvertex(h)))
+    connect(@fix1topo (vertex(h), headvertex(h)))
 end
 
 ############################# validation #############################
@@ -586,7 +632,7 @@ function graphviz(topo::IHTopology;title="",engine="sfdp")
     println(buffer,'\n')
     for e in edgeids(topo)
         h = _halfedge(e)
-        v,hv = @fix1 topo (vertex(h), headvertex(h))
+        v,hv = @fix1topo (vertex(h), headvertex(h))
         println(buffer,"    $v -> $hv [headlabel=$h,taillabel=$(_twin(h)),dir=both]")
     end
     """
@@ -654,37 +700,6 @@ function flipedge!(topo::IHTopology{3}, e::EID)
     return topo
 end
 flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
-
-_degree_deviation(dv1::Int,dv2::Int,du1::Int,du2::Int) = abs(dv1-6)+abs(dv2-6)+abs(du1-6)+abs(du2-6)
-_should_flip(dv1::Int,dv2::Int,du1::Int,du2::Int) = _degree_deviation(dv1-1,dv2-1,du1+1,du2+1) > _degree_deviation(dv1,dv2,du1,du2)
-
-function should_flip(topo::IHTopology{3},e::EID)
-    h1,h2 = _bothhalfedge(e)
-    v1,v2 = @fix1 topo vertex(h1),vertex(h2)
-    u1,u2 = @fix1 topo headvertex(next(h1)),headvertex(next(h2))
-    dv1,dv2,du1,du2 = @fix1 topo vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
-    return _should_flip(dv1,dv2,du1,du2)
-end
-function improve_vertex_degree!(topo::IHTopology{3}, p::Real; max_checks::Int=nedges(topo))
-    @assert 0 < p <= 1
-    pastflips = CircularBuffer{Bool}(ceil(Int, 2inv(p)))
-    fill!(pastflips, true)
-    nflips = nchecks = 0
-    edges = edgeids(topo)
-    while mean(pastflips) > p && nchecks < max_checks
-        nchecks += 1
-        e = rand(edges)
-        isboundary(topo, e) && continue
-        doflip = should_flip(topo, e)
-        if doflip
-            flipedge!(topo, e)
-            nflips += 1
-        end
-        push!(pastflips, doflip)
-    end
-    @show nflips, nchecks
-    return topo
-end
     
 
 """
@@ -717,12 +732,82 @@ function splitedge!(topo::IHTopology{3}, e::EID)
     form_triangle!(topo,f1_,v,v2,u1,h1_,h11,w1_)
     form_triangle!(topo,f2_,v,v1,u2,h2,h21,w2_)
     
-    return v
+    return v,e,_edge(h1_)
 end
 splitedge!(topo::IHTopology{3}, h::HID) = splitedge!(topo, _edge(h))
 
-topo_square = IHTopology{3}([[1,2,3],[1,3,4]])
-# graphviz(square,"circo")
-# flipedge!(square,find_edge(square,VID(1),VID(3)))
 
-# graphviz(grid)
+""" Check of halfedge is part of a "pinch" triangle, i.e. either of two triangles that share two edges. Adapted from Geometry Central's `collapseEdgeTriangular`.
+"""
+function ispinch(topo::IHTopology{3}, h0::HID)
+    for h1 in VHIterator(topo,vertex(topo,h0)), h2 in VHIterator(topo,vertex(topo,h1))
+        # going around a face interior
+        @fix1topo next(h0)==h1 && next(h1) == h2 && continue
+        # going around a face exterior (twins of interior next loop)
+        @fix1topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
+        @fix1topo headvertex(h2) == vertex(h0) && return true
+    end
+    return false
+end
+function ispinch(topo::IHTopology{3}, e::EID)
+    h1,h2 = _bothhalfedge(e)
+    ispinch(topo, h1) || ispinch(topo, h2)
+end
+ispinch(topo::IHTopology{3}, f::FID) = ispinch(topo, halfedge(topo, f))
+@fix1able ispinch
+
+@propagate_inbounds function reassign_vid_to!(topo::IHTopology, vid::VID, vid_::VID)
+    # everything that had vid now has vid_
+    hs = collect(VHIterator(topo, vid))
+    for (h,h_) in zip(VHIterator(topo, vid),hs)
+        @assert h==h_
+        topo.h2v[h] = vid_
+    end
+    
+    # every property vid_ had replaced with everything vid has
+    topo.v2h[vid_] = vid
+    
+    topo
+end
+@propagate_inbounds function reassign_interior_hid_to!(topo::IHTopology{3}, hid::HID, hid_::HID)
+    # everything that had hid now has hid_
+    topo.h2next[prev_interior_loop(topo, hid)] = hid_
+    topo.v2h[vertex(topo, hid)] = hid_
+    topo.f2h[face(topo, hid)] = hid_
+    
+    # every property hid_ had replaced with everything hid has
+    topo.h2next[hid_] = topo.h2next[hid]
+    topo.h2v[hid_] = topo.h2v[hid]
+    topo.h2f[hid_] = topo.h2f[hid]
+    
+    return topo
+end
+
+function collapseedge!(topo::IHTopology{3}, e::EID, hids_delete, vids_delete, fids_delete)
+    @assert !isboundary(topo, e)
+    h1,h2 = _bothhalfedge(e)
+    # @infiltrate e==22
+    @assert @fix1topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
+    
+    @assign_vars_diamond topo e
+    h12_,h22_ = _twin(h12), _twin(h22)
+    
+    topo.v2h[v1] = h12_ # know to have base vertex v1
+    reassign_vid_to!(topo, v2, v1)
+    
+    topo.v2h[u1] = _twin(h11)
+    topo.v2h[u2] = _twin(h21)
+    reassign_interior_hid_to!(topo, h12_, h11)
+    reassign_interior_hid_to!(topo, h22_, h21)
+    
+    push!(hids_delete, h1, h2, h12, h22, h12_, h22_)
+    push!(vids_delete, v2)
+    push!(fids_delete, f1, f2)
+    
+    topo.h2next[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
+    topo.h2v[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
+    topo.h2f[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
+    topo.v2h[v2] = INVALID_ID
+    topo.f2h[[f1,f2]] .= INVALID_ID
+    return v1,_edge(h11),_edge(h21)
+end
