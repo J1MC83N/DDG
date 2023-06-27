@@ -1,8 +1,3 @@
-name = "FastOBJ"
-uuid = "9292563e-d3fd-4146-8625-f91e6ba20d2d"
-authors = ["J1MC83N <sevenred.chen@outlook.com>"]
-version = "0.1.0"
-
 [deps]
 CBinding = "d43a6710-96b8-4a2d-833c-c424785e5374"
 CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"

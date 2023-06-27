@@ -2,8 +2,10 @@ module FastOBJ
 export FastObjTexture, FastOBJMaterial, FastObjUInt, FastObjIndex, FastObjGroup, FastObjMesh, fast_obj_read, fast_obj_destroy
 
 using PrecompileTools
-using CBinding
-using CxxWrap
+@recompile_invalidations begin
+    using CBinding
+    using CxxWrap
+end
 
 c`-std=c89 -Wall`
 
@@ -114,9 +116,9 @@ typedef struct
 
 # @setup_workload begin
 @compile_workload begin
-    @wrapmodule("/Users/qihong.chen/Puter/Programss/DDG/fast_obj/lib/libfast_obj_jl.dylib")
+    @wrapmodule(pwd()*"/fast_obj/lib/libfast_obj_jl.dylib")
     @initcxx
-    fast_obj_destroy(fast_obj_read("/Users/qihong.chen/Puter/Programss/DDG/test-obj/tetrahedron.obj"))
+    fast_obj_destroy(fast_obj_read(pwd()*"/test-obj/tetrahedron.obj"))
 end
 # end
 function __init__()
