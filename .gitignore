@@ -27,3 +27,4 @@ Manifest.toml
 test-obj/*.obj
 .vscode/settings.json
 profile.pb.gz
+FastOBJ/src/FastOBJ.jl

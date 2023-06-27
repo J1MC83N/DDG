@@ -116,7 +116,7 @@ typedef struct
 
 # @setup_workload begin
 @compile_workload begin
-    @wrapmodule(pwd()*"/fast_obj/lib/libfast_obj_jl.dylib")
+    @wrapmodule(pwd()*"/FastOBJ/src/libfast_obj_jl.dylib")
     @initcxx
     fast_obj_destroy(fast_obj_read(pwd()*"/test-obj/tetrahedron.obj"))
 end
