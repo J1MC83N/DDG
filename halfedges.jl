@@ -73,7 +73,9 @@ copy(topo::IHTopology{N}) where N = deepcopy(topo)
 
 """
 Relationship between edge handle and halfedge handle:
+
 HID: [1,2,3,4,5,6,7,8]
+
 EID: [⌞1⌟,⌞2⌟,⌞3⌟,⌞4⌟]
 """
 EID
@@ -98,7 +100,7 @@ halfedgeids(topo::IHTopology) = HID(1):maxhid(topo)
 edgeids(topo::IHTopology) = EID(1):maxeid(topo)
 faceids(topo::IHTopology) = FID(1):maxfid(topo)
 
-# convenience methods for getting around an IHTopology, also improve code readability
+# primary methods for getting around an IHTopology, also improve code readability
 import Base: @propagate_inbounds
 @propagate_inbounds next(topo::IHTopology,hid::HID) = topo.h2next[hid]
 _twin(id::HID) = HID(((id-1)⊻1)+1)
@@ -147,7 +149,6 @@ prev_interior_loop(topo::IHTopology{0},hid::HID) = prev_loop(topo, hid)
         hid
     end
 end
-
     
 # the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
 halfedge(::IHTopology,cid::CID) = HID(cid)
@@ -159,6 +160,21 @@ halfedge(::IHTopology,cid::CID) = HID(cid)
 @propagate_inbounds opp_corner(topo::IHTopology{3},h::HID) = (@assert !isnothing(face(topo,h)); unsafe_opp_corner(topo,h))
 @propagate_inbounds unsafe_opp_halfedge(topo::IHTopology{3},c::CID) = next(topo,next(topo,HID(c)))
 @propagate_inbounds opp_halfedge(topo::IHTopology{3},c::CID) = (@assert !isnothing(face(topo,c)); unsafe_opp_corner(topo,c))
+
+
+const _IH_PRIMARY_METHODS = [
+    (:next,HID),(:next,CID),
+    (:prev_global,HID),(:prev_loop,HID),(:prev_interior_loop,HID),
+    (:twin,HID),
+    (:vertex,HID),(:vertex,CID),(:headvertex,HID),
+    (:face,HID),(:face,CID),
+    (:halfedge,VID),(:halfedge,FID),(:halfedge,CID),(:halfedge,EID),
+    (:edge,HID),(:edge,VID),(:edge,FID),
+    (:bothvertex,EID),(:bothedge,EID),(:bothface,EID),
+    (:unsafe_opp_corner,HID),(:opp_corner,HID),
+    (:unsafe_opp_halfedge,CID),(:opp_halfedge,CID),
+]
+
 
 # define partial applications
 const _PARTIAL_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :edge])
@@ -358,8 +374,8 @@ find_edge(topo::IHTopology,v1::Integer,v2::Integer) = _edge(find_halfedge(topo,v
 import Meshes: element, facet
 element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))))
 element(topo::IHTopology{N}, f::Integer) where N = Connectivity{Ngon{N},N}(Tuple(FVIterator(topo,FID(f))))
-function facet(topo::IHTopology, e::Integer)
-    h = HID(2*e-1)
+function facet(::IHTopology, e::Integer)
+    h = _halfedge(EID(e))
     connect(@fix1topo (vertex(h), headvertex(h)))
 end
 

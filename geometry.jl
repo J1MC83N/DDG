@@ -17,15 +17,8 @@ for f in [:nfaces, :nhalfedges, :nhvf, :nedges, :vertexids, :halfedgeids, :facei
     @eval $f(mesh::IHMesh) = $f(topology(mesh))
 end
 
-for (f, T) in [(:next,HID),(:next,CID),
-               (:prev_global,HID),(:prev_loop,HID),(:prev_interior_loop,HID),
-               (:twin,HID),
-               (:vertex,HID),(:vertex,CID),(:headvertex,HID),
-               (:face,HID),(:face,CID),
-               (:halfedge,VID),(:halfedge,FID),(:halfedge,CID),(:halfedge,EID),
-               (:edge,HID),(:edge,VID),(:edge,FID),
-               (:bothvertex,EID),(:bothedge,EID),(:bothface,EID)]
-    @eval @propagate_inbounds $f(mesh::IHMesh, id::$T) = $f(topology(mesh),id)
+for (f, H) in _IH_PRIMARY_METHODS
+    @eval @propagate_inbounds $f(mesh::IHMesh, id::$H) = $f(topology(mesh),id)
 end
 
 macro fix1mesh(ex)

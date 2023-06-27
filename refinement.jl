@@ -156,9 +156,11 @@ end
 function merged_position(mesh::IHTriMesh{3,T},v1::VID,v2::VID,planecache::PC) where {T,PC<:AbstractVector{Vec{4,T}}}
     fids_neighbor = Iterators.flatten((VIFIterator(mesh,v1),VIFIterator(mesh,v2)))
     B,w = _vertex_quadatric(fids_neighbor,planecache)
-    sol = B\w
-    out = isfinite(sum(sol)) ? Point{3,T}(-sol) : midpoint(mesh,v1,v2)
-    @infiltrate abs(coordinates(out)[3]) > 2.5
+    # sol = B\w
+    I4 = SVector{4,T}(0,0,0,1)
+    sol = vcat(hcat(B,w),I4')\I4
+    out = isfinite(sum(sol)) ? Point{3,T}(sol[SOneTo(3)]) : midpoint(mesh,v1,v2)
+    # @infiltrate abs(coordinates(out)[3]) > 2.5
     return out
 end
 
@@ -217,7 +219,7 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
     
     edges_tocollapse = EID[]
     edges_seam = EID[]
-    for e in edgeids(mesh)
+    @forlorn for e in edgeids(mesh)
         isboundary(mesh,e) && continue
         hasintersection(hids_delete,_bothhalfedge(e)) && continue
         @assign_vars_diamond mesh e
@@ -230,6 +232,7 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
             newpos = merged_position(mesh,bothvertex(mesh,e)...,planecache)
             v,es1,es2 = collapseedge!(topology(mesh),e,hids_delete,vids_delete,fids_delete)
             positions[v] = newpos
+            # @infiltrate e == 61014
             for fid in VIFIterator(mesh,v)
                 planecache[fid] = plane_equation(mesh[fid])
             end
@@ -321,35 +324,37 @@ winsize(nx,ny) = (3072÷nx,(1920-46)÷ny-46)
 
 mesh = IHMesh("test-obj/coin.obj")
 mesh_original = deepcopy(mesh)
-GLMakie.activate!(title="original")
-resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,2)...)
+# GLMakie.activate!(title="original")
+# resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,2)...)
+
+center_vertices!(mesh)
 
 edges_tosplit,edges_split = split_long_edges!(mesh)
 facetcolor = color_edges(mesh,:black,edges_split,:red)
 center_vertices!(mesh)
 mesh_split = deepcopy(mesh)
-GLMakie.activate!(title="Post-split")
-resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
+# GLMakie.activate!(title="Post-split")
+# resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
 # display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor))
 
 edges_tocollapse,edges_seam = collapse_short_edges!(mesh)
 center_vertices!(mesh)
 mesh_collapse = deepcopy(mesh)
 
-facetcolor = color_edges(mesh_split,:black,edges_tocollapse,:red)
-GLMakie.activate!(title="Pre-collapse")
-resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
+# facetcolor = color_edges(mesh_split,:black,edges_tocollapse,:red)
+# GLMakie.activate!(title="Pre-collapse")
+# resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
 
-facetcolor = color_edges(mesh_collapse,:black,edges_seam,:red)
-GLMakie.activate!(title="Post-collapse")
-resize!(display(GLMakie.Screen(),viz(mesh_collapse,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
+# facetcolor = color_edges(mesh_collapse,:black,edges_seam,:red)
+# GLMakie.activate!(title="Post-collapse")
+# resize!(display(GLMakie.Screen(),viz(mesh_collapse,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
 
 
 improve_delaunay2!(mesh)
 center_vertices!(mesh)
 mesh_delaunay = deepcopy(mesh)
-GLMakie.activate!(title="Delaunay")
-resize!(display(GLMakie.Screen(),viz(mesh_delaunay,showfacets=true,color=:lightblue,facetcolor=:black)), winsize(2,2)...)
+# GLMakie.activate!(title="Delaunay")
+# resize!(display(GLMakie.Screen(),viz(mesh_delaunay,showfacets=true,color=:lightblue,facetcolor=:black)), winsize(2,2)...)
 
 # center_vertices!(mesh)
 # mesh_centered = deepcopy(mesh)
@@ -358,11 +363,11 @@ resize!(display(GLMakie.Screen(),viz(mesh_delaunay,showfacets=true,color=:lightb
 
 
 
-# mesh = IHMesh("test-obj/coin.obj")
-# mesh_original = deepcopy(mesh)
-# GLMakie.activate!(title="original")
-# resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
+mesh = IHMesh("test-obj/coin.obj")
+mesh_original = deepcopy(mesh)
+GLMakie.activate!(title="original")
+resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
 
-# routine!(mesh)
-# GLMakie.activate!(title="routine")
-# resize!(display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
+routine!(mesh)
+GLMakie.activate!(title="routine")
+resize!(display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)

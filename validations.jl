@@ -23,7 +23,7 @@
 #     return orb
 # end
 
-using MyMacros: @forlorn
+using MyMacros: @forlorn, @assert_infiltrate
 
 @inline ex_in(ex::NTuple{2,<:Real},bounds::NTuple{2,<:Real}) = ex[1] >= bounds[1] && ex[2] <= bounds[2]
 function validate_topology_handlebounds(topo::IHTopology)

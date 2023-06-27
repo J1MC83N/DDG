@@ -1,6 +1,6 @@
 # Base.convert(::Type{HalfEdgeTopology}, t::HalfEdgeTopology) = t
 import MeshViz: vizmesh2D!, process
-function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:IHMesh
+function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh,IHSubMesh}
     mesh = plot[:object]
     color = plot[:color]
     alpha = plot[:alpha]
