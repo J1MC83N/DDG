@@ -1,4 +1,3 @@
-include("halfedges.jl")
 using LinearAlgebra, SparseArrays, LinearSolve, DataStructures
 
 const ImplicitHalfEdgeMesh{Dim,T,V<:AbstractVector{Point{Dim,T}},N} = SimpleMesh{Dim,T,V,ImplicitHalfEdgeTopology{N}}
@@ -209,86 +208,6 @@ end
 
 
 
-######################## Mean Curvature Flow #################################
-
-include("laplacematrix.jl")
-# massmatrix(mesh::IHTriMesh) = Diagonal([barycentric_dual_area(mesh, vid) for vid in vertexids(mesh)])
-function massmatrix(mesh::IHTriMesh{Dim,T}) where {Dim,T}
-    v_mass = zeros(T, nvertices(mesh))
-    for fid in faceids(mesh)
-        farea3 = area(mesh, fid)/3
-        for vid in FVIterator(mesh, fid)
-            v_mass[vid] += farea3
-        end
-    end
-    Diagonal(v_mass)
-end
-
-function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
-    np = length(points)
-    out = ntuple(_->Vector{T}(undef,np),Val{Dim}())
-    @inbounds for ip in 1:np
-        coords = coordinates(points[ip])
-        for dim in 1:Dim
-            out[dim][ip] = coords[dim]
-        end
-    end
-    return out
-end
-
-# solves APₕ = MP₀ via backward Euler, where A = M(I-h*Δ) = M+h*L, L=-MΔ
-function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=eps(T)), solver::Union{Nothing,LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
-    @assert Dim > 2
-    h = convert(T, h)
-    vertices = vertices(mesh)
-    M = massmatrix(mesh)
-    A = M+h*L
-    P0_dims = splitbydim(vertices)
-    
-    # solving
-    Ph_dims = Vector{Vector{T}}(undef,Dim)
-    prob = LinearProblem(A,M*P0_dims[1])
-    linsolve = init(prob,solver);
-    Ph_dims[1] = solve!(linsolve)
-    for dim in 2:Dim
-        linsolve.b = M*P0_dims[dim]
-        Ph_dims[dim] = solve!(linsolve)
-    end
-    # updating vertex positions
-    @inbounds for vid in vertexids(mesh)
-        point = Point{Dim,T}([Ph_dims[dim][vid] for dim in 1:Dim])
-        vertices[vid] = point
-    end
-    return mesh
-end
-
-
-topo_square = IHTopology{3}([[1,2,3],[1,3,4]])
-square = IHTriMesh(Meshes.Point2[(0,0),(0,1),(1,1),(1,0)],topo_square)
-topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]]);
-pyramid = IHTriMesh(Point3[(0,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid);
-pyramid_skewed = IHTriMesh(Point3[(1,0,1),(1,0,0),(0,1,0),(-1,0,0),(0,-1,0)], topo_pyramid)
-gourd = IHMesh("test-obj/gourd.obj")
-mesh = trumpet = IHMesh("test-obj/trumpet.obj")
-ear = IHMesh("test-obj/ear.obj")
-coin = IHMesh("test-obj/coin.obj")
-arrowhead = IHMesh("test-obj/arrowhead.obj")
-# dragon = IHMesh("test-obj/dragon.obj")
-
-# @profview mean_curvature_flow!(arrowhead,0.01)
-# pprof()
-
-using GLMakie
-using MeshViz
-GLMakie.Makie.inline!(false)
-include("meshviz_mod.jl")
-
-
-
-
-# @time mean_curvature_flow!(ear,0.01,solver=KrylovJL());
-# viz(mesh,showfacets=true)
-
 # enable_timer!(to)
 # _mesh = IHMesh("test-obj/arrowhead.obj",show_progress=false)
 # to
@@ -352,10 +271,3 @@ obj read                                1    1.63s   23.7%   1.63s    448MiB   1
 mesh construction                       1    900ms   13.1%   900ms   1.23GiB   30.3%  1.23GiB
 ─────────────────────────────────────────────────────────────────────────────────────────────
 """
-
- 
-# @pprof IHMesh("test-obj/dragon.obj",show_progress=false)
-
-
-# _v = zeros(Int,nvertices(_mesh))
-# for ((v1,v2),_) in _E2FID; _v[v1] += 1 end

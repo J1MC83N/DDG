@@ -1,4 +1,8 @@
 # Base.convert(::Type{HalfEdgeTopology}, t::HalfEdgeTopology) = t
+using GLMakie
+using MeshViz
+GLMakie.Makie.inline!(false)
+
 import MeshViz: vizmesh2D!, process
 function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh,IHSubMesh}
     mesh = plot[:object]

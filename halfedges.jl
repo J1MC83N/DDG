@@ -9,8 +9,6 @@ Naming conventions:
     -- xxos: index/id offset
 =#
 
-using Pkg; Pkg.activate(".")
-using Infiltrator; Infiltrator.toggle_async_check(false)
 using Meshes, StaticArrays, UnPack, Bijections, DataStructures, IterTools, ProgressMeter, Statistics
 using TimerOutputs; const to = TimerOutput(); disable_timer!(to)
 
@@ -30,27 +28,6 @@ function Base.sizehint!(B::Bijection, n::Integer)
     sizehint!(B.range, n)
     B
 end
-
-# function _gi(ex::Expr)
-#     ex.head === :call || return ex
-#     return if ex.args[1] === :|>
-#         Expr(:ref, _gi(ex.args[3]), _gi(ex.args[2]))
-#     else
-#         Expr(:call, _gi.(ex.args)...)
-#     endj
-# end
-# _gi(ex) = ex
-# macro gi(ex)
-#     _gi(ex)
-# end
-
-include("Handles.jl")
-@HandleType_alias HalfEdgeHandle HID
-@HandleType_alias VertexHandle VID
-@HandleType_alias FaceHandle FID
-@HandleType_alias EdgeHandle EID
-@HandleType_alias CornerHandle CID
-const INVALID_ID = 0
 
 """
     ImplicitHalfEdgeTopology{N} <: Topology
@@ -379,9 +356,7 @@ function facet(::IHTopology, e::Integer)
     connect(@fix1topo (vertex(h), headvertex(h)))
 end
 
-############################# validation #############################
 
-include("validations.jl")
 
 ################ Methods for constructing IHTopology from polygon soup ##################
 

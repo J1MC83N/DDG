@@ -81,6 +81,3 @@ for (PT, ST) in [(IHTopology,IHSubTopology), (IHMesh,IHSubMesh)]
     @eval subset(parent::$PT, fids) = subset(parent, Set{FID}(fids))
 end
 
-
-submesh = subset(gourd,faceids(gourd))
-viz(submesh)
