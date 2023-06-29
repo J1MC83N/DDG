@@ -1,13 +1,18 @@
 using Pkg; Pkg.activate(".")
 using Infiltrator; Infiltrator.toggle_async_check(false)
 
-include("Handles.jl")
+include("utils/Handles.jl")
 @HandleType_alias HalfEdgeHandle HID
 @HandleType_alias VertexHandle VID
 @HandleType_alias FaceHandle FID
 @HandleType_alias EdgeHandle EID
 @HandleType_alias CornerHandle CID
 const INVALID_ID = 0
+
+include("utils/setwo-dictwo.jl")
+include("utils/vector-set-dict.jl")
+include("utils/matrix-set-dict.jl")
+include("utils/cycpairvector.jl")
 
 include("halfedges.jl")
 include("validations.jl")

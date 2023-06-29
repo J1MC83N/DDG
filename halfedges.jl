@@ -368,8 +368,6 @@ end
 
 ################ Methods for constructing IHTopology from polygon soup ##################
 
-include("polygon_soup_utils.jl")
-
 # internal type aliases
 const _Edge = VIDSetwo
 const _OEdge = NTuple{2,VID} # an edge with fixed direction/orientation 
