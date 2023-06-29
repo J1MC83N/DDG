@@ -4,6 +4,32 @@ using MeshViz
 GLMakie.Makie.inline!(false)
 
 import MeshViz: vizmesh2D!, process
+Makie.plottype(::IHSubMesh) = Viz{<:Tuple{IHSubMesh}}
+# function Makie.point_iterator(list::ReindexedVector)
+#     return collect(list)
+# end
+
+
+function Makie.plot!(plot::Viz{<:Tuple{IHSubMesh}})
+    # retrieve mesh and rank
+    mesh = plot[:object][]
+    rank = paramdim(mesh)
+    
+    # different recipes for meshes with
+    # 1D, 2D, 3D, ... ND simplices
+    if rank == 1
+        # visualize segments
+        vizmesh1D!(plot)
+    elseif rank == 2
+        # visualize polygons
+        vizmesh2D!(plot)
+    elseif rank == 3
+        # visualize polyhedra
+        vizmesh3D!(plot)
+    end
+end
+
+
 function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh,IHSubMesh}
     mesh = plot[:object]
     color = plot[:color]
@@ -27,7 +53,7 @@ function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh
         elems = elements(topo)
         
         # coordinates of vertices
-        coords = coordinates.(verts)
+        coords = map(coordinates,verts)
         
         # fan triangulation (assume convexity)
         tris4elem = map(elems) do elem
@@ -102,18 +128,15 @@ function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh
     shading=tshading,
     )
     
-    # @infiltrate
-    
     if showfacets[]
         # retrieve coordinates parameters
         xparams = Makie.@lift let
             # relevant settings
             dim = embeddim($mesh)
             topo = topology($mesh)
-            nvert = nvertices($mesh)
             verts = vertices($mesh)
-            coords = coordinates.(verts)
-            
+            nvert = length(verts)
+            coords = map(coordinates,verts)
             # # use a sophisticated data structure
             # # to extract the edges from the n-gons
             # t = convert(HalfEdgeTopology, topo)
@@ -123,7 +146,7 @@ function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh
             # interleaved with a sentinel index
             inds = Int[]
             for e in edgeids(topo)
-                push!(inds, bothvertex(topo,e)..., nvert + 1)
+                push!(inds, bothvertex(topo,e)..., nvert+1)
             end
             
             # fill sentinel index with NaN coordinates

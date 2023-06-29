@@ -14,10 +14,11 @@ include("validations.jl")
 include("geometry.jl")
 include("mean_curvature_flow.jl")
 include("refinement.jl")
+include("subset.jl")
 include("meshviz_mod.jl")
 
 
-
+using Meshes: Point3
 topo_square = IHTopology{3}([[1,2,3],[1,3,4]])
 square = IHTriMesh(Meshes.Point2[(0,0),(0,1),(1,1),(1,0)],topo_square)
 topo_pyramid = IHTopology{3}([[1,2,3],[1,3,4],[1,4,5],[1,5,2]]);
@@ -35,7 +36,7 @@ arrowhead = IHMesh("test-obj/arrowhead.obj")
 
 
 
-using Profile, PProf, BenchmarkTools
+# using Profile, PProf, BenchmarkTools
 # mesh = IHMesh("test-obj/coin.obj")
 # edges = collapse_short_edges!(mesh)
 # display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue,shininess=320))
@@ -60,7 +61,7 @@ mesh_original = deepcopy(mesh)
 
 center_vertices!(mesh)
 
-edges_tosplit,edges_split = split_long_edges!(mesh)
+edges_tosplit,edges_split = split_long_edges!(mesh; shuffle_order=false)
 facetcolor = color_edges(mesh,:black,edges_split,:red)
 center_vertices!(mesh)
 mesh_split = deepcopy(mesh)
@@ -72,11 +73,21 @@ edges_tocollapse,edges_seam = collapse_short_edges!(mesh)
 center_vertices!(mesh)
 mesh_collapse = deepcopy(mesh)
 
+# submesh = subset(mesh_collapse, flood_traversal(mesh_collapse, FID, FFIterator, bothface(mesh_collapse,EID(710)), 10))
+# display(GLMakie.Screen(), vizsub(submesh,0.05,showfacets=true))
+
+# submesh = subset(mesh_split, flood_traversal(mesh_split, FID, FFIterator, bothface(mesh_split,EID(135238)), 1))
+# display(GLMakie.Screen(), vizsub(submesh,0.1,showfacets=true))
+
 # facetcolor = color_edges(mesh_split,:black,edges_tocollapse,:red)
+# submesh = subset(mesh_split, flood_traversal(mesh_split, FID, FFIterator, bothface(mesh_split,_edge(HID(1663))), 10))
+# facetcolor = color_edges(mesh_split,:black,_edge.(submesh.hids),:red)
 # GLMakie.activate!(title="Pre-collapse")
 # resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
+# vizsub(submesh, 0.05; showfacets=true)
 
 # facetcolor = color_edges(mesh_collapse,:black,edges_seam,:red)
+# facetcolor = color_edges(mesh_collapse,:black,_edge.(submesh.hids),:red)
 # GLMakie.activate!(title="Post-collapse")
 # resize!(display(GLMakie.Screen(),viz(mesh_collapse,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
 
@@ -105,6 +116,16 @@ resize!(display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue;facet
 
 
 
-
-submesh = subset(gourd,faceids(gourd))
-viz(submesh)
+function vizsub(submesh::IHSubMesh, zoom; kwargs...)
+    GLMakie.Makie.inline!(false)
+    verts = getindex(vertices(submesh),submesh.vids|>collect)
+    plt = viz(submesh; kwargs...)
+    cam = cameracontrols(plt.axis.scene)
+    com = GLMakie.Vec3f(mean(coordinates,verts))
+    update_cam!(plt.axis.scene, cam, cam.eyeposition[], com)
+    zoom!(plt.axis.scene, zoom)
+    plt
+end
+submesh = subset(gourd,flood_traversal(gourd,FIFIterator,FID(300),2))
+vizsub(submesh,showfacets=true)
+# cameracontrols!(plt.axis,cam)

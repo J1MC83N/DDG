@@ -147,9 +147,12 @@ const _IH_PRIMARY_METHODS = [
     (:face,HID),(:face,CID),
     (:halfedge,VID),(:halfedge,FID),(:halfedge,CID),(:halfedge,EID),
     (:edge,HID),(:edge,VID),(:edge,FID),
-    (:bothvertex,EID),(:bothedge,EID),(:bothface,EID),
     (:unsafe_opp_corner,HID),(:opp_corner,HID),
     (:unsafe_opp_halfedge,CID),(:opp_halfedge,CID),
+]
+
+const _IH_SECONDARY_METHODS = [
+    (:bothvertex,EID),(:bothedge,EID),(:bothface,EID),
 ]
 
 
@@ -178,7 +181,11 @@ function _fix1(fixed,ex::Expr)
             Expr(:call, fun, esc(fixed), [_fix1(fixed,arg) for arg in ex.args[2:end]]...)
         elseif fun === :|>
             fun_actual = ex.args[3]
-            Expr(:call, esc(fun_actual), esc(fixed), _fix1(fixed,ex.args[2]))
+            if fun_actual in _FIX1_METHODS
+                Expr(:call, esc(fun_actual), esc(fixed), _fix1(fixed,ex.args[2]))
+            else
+                Expr(:call, esc(fun_actual), _fix1(fixed,ex.args[2]))
+            end
         else
             Expr(:call, [_fix1(fixed,arg) for arg in ex.args]...)
         end
@@ -289,8 +296,9 @@ function Base.iterate(iter::VHIterator_Tracked)
 end
 function Base.iterate(iter::VHIterator_Tracked, h::HID)
     @unpack topo,h_start = iter
-    (iter.degree += one(UInt8)) >= VH_MAX_DEGREE && return nothing
+    iter.degree+one(UInt8) >= VH_MAX_DEGREE && return nothing
     h_start == h && return nothing
+    iter.degree += one(UInt8)
     return (h, @fix1topo next(twin(h)))
 end
 
@@ -728,24 +736,31 @@ end
 splitedge!(topo::IHTopology{3}, h::HID) = splitedge!(topo, _edge(h))
 
 
-""" Check of halfedge is part of a "pinch" triangle, i.e. either of two triangles that share two edges. Adapted from Geometry Central's `collapseEdgeTriangular`.
-"""
-function ispinch(topo::IHTopology{3}, h0::HID)
-    for h1 in VHIterator(topo,vertex(topo,h0)), h2 in VHIterator(topo,vertex(topo,h1))
-        # going around a face interior
-        @fix1topo next(h0)==h1 && next(h1) == h2 && continue
-        # going around a face exterior (twins of interior next loop)
-        @fix1topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
-        @fix1topo headvertex(h2) == vertex(h0) && return true
-    end
-    return false
+# """ Check of halfedge is part of a "pinch" triangle, i.e. either of two triangles that share two edges. Adapted from Geometry Central's `collapseEdgeTriangular`.
+# """
+# function ispinch(topo::IHTopology{3}, h0::HID)
+#     for h1 in VHIterator(topo,headvertex(topo,h0)), h2 in VHIterator(topo,headvertex(topo,h1))
+#         # going around a face interior
+#         @fix1topo next(h0)==h1 && next(h1) == h2 && continue
+#         # going around a face exterior (twins of interior next loop)
+#         @fix1topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
+#         @fix1topo headvertex(h2) == vertex(h0) && return true
+#     end
+#     return false
+# end
+# function ispinch(topo::IHTopology{3}, e::EID)
+#     h1,h2 = _bothhalfedge(e)
+#     ispinch(topo, h1) || ispinch(topo, h2)
+# end
+# ispinch(topo::IHTopology{3}, f::FID) = ispinch(topo, halfedge(topo, f))
+# @fix1able ispinch
+
+function are_bothface_overlapping(topo::IHTopology{3}, e::EID)
+    h11,h21 = _bothhalfedge(e)
+    h12,h22 = @fix1topo next(h11),next(h21)
+    v13,v23 = @fix1topo headvertex(h12),headvertex(h22)
+    return @fix1topo vertex(h11)==vertex(h22) && vertex(h12)==vertex(h21) && v13==v23
 end
-function ispinch(topo::IHTopology{3}, e::EID)
-    h1,h2 = _bothhalfedge(e)
-    ispinch(topo, h1) || ispinch(topo, h2)
-end
-ispinch(topo::IHTopology{3}, f::FID) = ispinch(topo, halfedge(topo, f))
-@fix1able ispinch
 
 @propagate_inbounds function reassign_vid_to!(topo::IHTopology, vid::VID, vid_::VID)
     # everything that had vid now has vid_
@@ -777,8 +792,7 @@ end
 function collapseedge!(topo::IHTopology{3}, e::EID, hids_delete, vids_delete, fids_delete)
     @assert !isboundary(topo, e)
     h1,h2 = _bothhalfedge(e)
-    # @infiltrate e==22
-    @assert @fix1topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
+    # @assert @fix1topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
     
     @assign_vars_diamond topo e
     h12_,h22_ = _twin(h12), _twin(h22)

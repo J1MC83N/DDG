@@ -13,11 +13,11 @@ facedegree(mesh::Mesh) = facedegree(topology(mesh))
 # Base.convert(::Type{IHMeshN{N}}, mesh::Mesh) where N = IHMeshN{N}(vertices(mesh),convert(IHTopology{N},topology(mesh)))
 
 for f in [:nfaces, :nhalfedges, :nhvf, :nedges, :vertexids, :halfedgeids, :faceids, :edgeids, :validate_topology]
-    @eval $f(mesh::IHMesh) = $f(topology(mesh))
+    @eval @fix1able @propagate_inbounds $f(mesh::IHMesh) = $f(topology(mesh))
 end
 
-for (f, H) in _IH_PRIMARY_METHODS
-    @eval @propagate_inbounds $f(mesh::IHMesh, id::$H) = $f(topology(mesh),id)
+for (f, H) in union(_IH_PRIMARY_METHODS, _IH_SECONDARY_METHODS)
+    @eval @fix1able @propagate_inbounds $f(mesh::IHMesh, id::$H) = $f(topology(mesh),id)
 end
 
 macro fix1mesh(ex)
@@ -123,10 +123,10 @@ import Meshes: ∠
 
 _cotan(v1::T, v2::T) where T<:Vec = dot(v1,v2)/norm(cross(v1,v2))
 @fix1able cotan(mesh::IHTriMesh, c::CID) = @fix1mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
-@fix1able unsafe_opp_corner(mesh::IHTriMesh,h::HID) = unsafe_opp_corner(topology(mesh),h)
-@fix1able opp_corner(mesh::IHTriMesh,h::HID) = opp_corner(topology(mesh),h)
-@fix1able unsafe_opp_halfedge(mesh::IHTriMesh,c::CID) = unsafe_opp_halfedge(topology(mesh),c)
-@fix1able opp_halfedge(mesh::IHTriMesh,c::CID) = opp_halfedge(topology(mesh),c)
+# @fix1able unsafe_opp_corner(mesh::IHTriMesh,h::HID) = unsafe_opp_corner(topology(mesh),h)
+# @fix1able opp_corner(mesh::IHTriMesh,h::HID) = opp_corner(topology(mesh),h)
+# @fix1able unsafe_opp_halfedge(mesh::IHTriMesh,c::CID) = unsafe_opp_halfedge(topology(mesh),c)
+# @fix1able opp_halfedge(mesh::IHTriMesh,c::CID) = opp_halfedge(topology(mesh),c)
 
 
 import Meshes: area, normal

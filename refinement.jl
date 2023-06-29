@@ -82,18 +82,21 @@ function improve_delaunay2!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
     while !isempty(E2Priority)
         e,delval = dequeue_pair!(E2Priority)
         delval <= π+√eps(T) && break # maximum edge value is below threshold
+        flip_produces_crease(mesh, e) && continue
+        # @infiltrate e==17571
         flipedge!(mesh, e); nflips += 1
+        
         # update priority affected edges
         @assign_vars_diamond mesh e
         for h in (h11,h12,h21,h22)
             eh = _edge(h)
             !haskey(E2Priority, eh) && continue
             hpriority = delaunayvalue(mesh, eh)
-            if hpriority <= π+√eps(T)
-                delete!(E2Priority, eh)
-            else
+            # if hpriority <= π+√eps(T)
+            #     delete!(E2Priority, eh)
+            # else
                 E2Priority[eh] = hpriority
-            end
+            # end
         end
     end
     @show nflips, nedges(mesh)
@@ -223,6 +226,8 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
         hasintersection(hids_delete,_bothhalfedge(e)) && continue
         @assign_vars_diamond mesh e
         hasintersection(vids_covered,(v1,v2,u1,u2)) && continue
+        # (vertexdegree(mesh,v1)<=3 || vertexdegree(mesh,v2)<=3) && continue
+        (vertexdegree(mesh,u1)<=3 || vertexdegree(mesh,u2)<=3) && continue
         # hasintersection(hids_delete, (h1,h11,h12,h2,h21,h22)) && continue
         # h11_,h21_,h12_,h22_ = _twin(h11),_twin(h21),_twin(h12),_twin(h22)
         # @show hids_delete,(h1,h11,h12,h2,h21,h22,h11_,h21_,h12_,h22_)
@@ -244,6 +249,7 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
     # @show edges
     @show ncollapse,nedges(mesh)
     hidmap,_,_ = _delete_ids!(topology(mesh),hids_delete,vids_delete,fids_delete)
+    # @infiltrate
     for i in eachindex(edges_seam)
         edges_seam[i] = _edge(hidmap[_halfedge(edges_seam[i])])
     end

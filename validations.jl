@@ -91,3 +91,11 @@ function validate_topology(topo::IHTopology)
     validate_topology_faceN(topo)
     nothing
 end
+
+
+function validate_no_overlapping_faces(topo::IHTopology)
+    for e in edgeids(topo)
+        @assert !are_bothface_overlapping(topo, e) "!are_bothface_overlapping(topo, EID($e))"
+    end
+    nothing
+end

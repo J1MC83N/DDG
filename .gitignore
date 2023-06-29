@@ -24,6 +24,7 @@ docs/site/
 Manifest.toml
 
 *.DS_Store
+**/.DS_Store
 test-obj/*.obj
 .vscode/settings.json
 profile.pb.gz
