@@ -4,33 +4,33 @@ using MeshViz
 GLMakie.Makie.inline!(false)
 
 import MeshViz: vizmesh2D!, process
-Makie.plottype(::IHSubMesh) = Viz{<:Tuple{IHSubMesh}}
+# Makie.plottype(::IHSubMesh) = Viz{<:Tuple{IHSubMesh}}
 # function Makie.point_iterator(list::ReindexedVector)
 #     return collect(list)
 # end
 
 
-function Makie.plot!(plot::Viz{<:Tuple{IHSubMesh}})
-    # retrieve mesh and rank
-    mesh = plot[:object][]
-    rank = paramdim(mesh)
+# function Makie.plot!(plot::Viz{<:Tuple{IHSubMesh}})
+#     # retrieve mesh and rank
+#     mesh = plot[:object][]
+#     rank = paramdim(mesh)
     
-    # different recipes for meshes with
-    # 1D, 2D, 3D, ... ND simplices
-    if rank == 1
-        # visualize segments
-        vizmesh1D!(plot)
-    elseif rank == 2
-        # visualize polygons
-        vizmesh2D!(plot)
-    elseif rank == 3
-        # visualize polyhedra
-        vizmesh3D!(plot)
-    end
-end
+#     # different recipes for meshes with
+#     # 1D, 2D, 3D, ... ND simplices
+#     if rank == 1
+#         # visualize segments
+#         vizmesh1D!(plot)
+#     elseif rank == 2
+#         # visualize polygons
+#         vizmesh2D!(plot)
+#     elseif rank == 3
+#         # visualize polyhedra
+#         vizmesh3D!(plot)
+#     end
+# end
 
 
-function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{M}}) where M<:Union{IHMesh,IHSubMesh}
+function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{T}}) where T<:IHMesh # where M<:Union{IHMesh,IHSubMesh}
     mesh = plot[:object]
     color = plot[:color]
     alpha = plot[:alpha]
