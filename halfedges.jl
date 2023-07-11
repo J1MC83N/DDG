@@ -44,6 +44,23 @@ struct ImplicitHalfEdgeTopology{N} <: Topology
     f2h     :: Vector{HID}
 end
 const IHTopology = ImplicitHalfEdgeTopology
+function IHTopology{N}(nh::Integer,nv::Integer,nf::Integer) where N
+    h2next = zeros(HID, nh)
+    h2v    = zeros(VID, nh)
+    h2f    = Vector{Union{FID,Nothing}}(undef, nh)
+    v2h    = zeros(HID, nv)
+    f2h    = zeros(HID, nf)
+    return IHTopology{N}(h2next, h2v, h2f, v2h, f2h)
+end
+
+# (fieldname,TYPE_FROM,TYPE_TO)
+const IHTOPOLOGY_FIELDS = SA[
+    (:h2next, HID, HID),
+    (:h2v,    HID, VID),
+    (:h2f,    HID, FID),
+    (:v2h,    VID, HID),
+    (:f2h,    FID, HID)
+]
 
 import Base.copy
 copy(topo::IHTopology{N}) where N = deepcopy(topo)
@@ -371,8 +388,8 @@ end
 # internal type aliases
 const _Edge = VIDSetwo
 const _OEdge = NTuple{2,VID} # an edge with fixed direction/orientation 
-const N_IMDICT = 6
-const Type_E2FID = Dictwo{_Edge,FID,FIDSetwo,Dict{_Edge,FID},IMDict{N_IMDICT,VID,_Edge,FIDSetwo}}
+const M_INT2DDICT_E2FID = 6
+const Type_E2FID = Dictwo{_Edge,FID,FIDSetwo,Dict{_Edge,FID},Int2DDict{M_INT2DDICT_E2FID,VID,_Edge,FIDSetwo}}
 
 # find the ids of adjecent faces along with the common (oriented) edge
 function adjacent_oedgefids(fid::FID,faces::Vector{F},E2FID::Type_E2FID) where  F<:AbstractVector{VID}
@@ -475,7 +492,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     
     ne_approx = sum(length,polys)÷2
     IE2E = UnsignedDict{EID,_Edge}(sizehint=ne_approx)
-    E2IE = IMDict{N_IMDICT,VID,VIDSetwo,EID}(nv)
+    E2IE = Int2DDict{M_INT2DDICT_E2FID,VID,VIDSetwo,EID}(nv)
     ie = EID(0) # edge id
     # FID2F = Bijection{FID,F}() # face associated with face ID
     E2FID = Type_E2FID(nv) # edge associated with one or two faces

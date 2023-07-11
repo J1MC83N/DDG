@@ -213,7 +213,7 @@ end
 # to
 
 """
-actual single thread: with IMDict N=6
+actual single thread: with Int2DDict N=6
 BenchmarkTools.Trial: 9 samples with 1 evaluation.
  Range (min … max):  561.540 ms … 580.230 ms  ┊ GC (min … max): 5.76% … 7.33%
  Time  (median):     573.638 ms               ┊ GC (median):    7.38%
@@ -237,7 +237,7 @@ BenchmarkTools.Trial: 9 samples with 1 evaluation.
 # @time IHMesh("test-obj/dragon.obj",show_progress=false)
 # to
 """
-actual single thread: with IMDict N=6
+actual single thread: with Int2DDict N=6
 8.283949 seconds (37.54 M allocations: 4.115 GiB, 8.84% gc time)
  ─────────────────────────────────────────────────────────────────────────────────────────────
                                                      Time                    Allocations      
@@ -254,7 +254,7 @@ actual single thread: with IMDict N=6
  mesh construction                       1    1.56s   20.4%   1.56s     0.00B    0.0%    0.00B
  ─────────────────────────────────────────────────────────────────────────────────────────────
 
-8 threads: with IMDict N=6
+8 threads: with Int2DDict N=6
 7.693358 seconds (90.04 M allocations: 5.344 GiB, 11.08% gc time)
 ─────────────────────────────────────────────────────────────────────────────────────────────
                                                     Time                    Allocations      

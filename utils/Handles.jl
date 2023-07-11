@@ -95,6 +95,7 @@ for op in (:+, :-, :*, :/, :mod, :div, :rem, :max, :min, :xor)
   @eval Base.$op(a::H, b::H) where {H<:Handle} = H($op(UInt64(a),UInt64(b)))
 end
 
+Base.:(==)(a::Handle, b::Handle) = a === b
 for op in (:<, :>, :<=, :>=)
   @eval Base.$op(a::H, b::H) where {H<:Handle} = $op(UInt64(a),UInt64(b))
 end
@@ -108,6 +109,7 @@ for from in Base.BitInteger_types
     @eval Base.rem(x::($from), ::Type{T}) where T<:Handle = Base.trunc_int(T, x)
   end
 end
+Base.trunc(::Type{H}, x::Real) where H<:Handle = H(trunc(UInt64, x))
 
 Base.parse(::Type{H},str::AbstractString) where H<:Handle = H(parse(Int,str))
 
