@@ -1,3 +1,6 @@
+# Adapted from Digital Domain's DiscreteDifferentialGeometry.jl
+
+
 # Copyright 2020 Digital Domain 3.0
 #
 # Licensed under the Apache License, Version 2.0 (the "Apache License")
@@ -20,9 +23,9 @@
 # KIND, either express or implied. See the Apache License for the specific
 # language governing permissions and limitations under the Apache License.
 
-# Adapted from Digital Domain's DiscreteDifferentialGeometry.jl
-
 import Meshes: laplacematrix
+
+
 function laplacematrix(mesh::IHTriMesh{Dim,T};shift::T=zero(T)) where {Dim,T}
     l = 9*nfaces(mesh) + !iszero(shift)*nvertices(mesh)
     P = mesh.vertices
@@ -38,9 +41,9 @@ function laplacematrix(mesh::IHTriMesh{Dim,T};shift::T=zero(T)) where {Dim,T}
         ij = Pⱼ-Pᵢ
         jk = Pₖ-Pⱼ
         ki = Pᵢ-Pₖ
-        a = _cotan(ij,-ki)*T(0.5)
-        b = _cotan(jk,-ij)*T(0.5)
-        c = _cotan(ki,-jk)*T(0.5)
+        a = -_cotan(ij,-ki)
+        b = -_cotan(jk,-ij)
+        c = -_cotan(ki,-jk)
         #L[i,i] += b+c
         indexI[s] = i; indexJ[s] = i; element[s] = b+c; s+=1
         #L[i,j] -= c

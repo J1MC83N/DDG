@@ -1,14 +1,14 @@
 include("laplacematrix.jl")
 # massmatrix(mesh::IHTriMesh) = Diagonal([barycentric_dual_area(mesh, vid) for vid in vertexids(mesh)])
 function massmatrix(mesh::IHTriMesh{Dim,T}) where {Dim,T}
-    v_mass = zeros(T, nvertices(mesh))
+    masses = zeros(T, nvertices(mesh))
     for fid in faceids(mesh)
         farea3 = area(mesh, fid)/3
         for vid in FVIterator(mesh, fid)
-            v_mass[vid] += farea3
+            masses[vid] += farea3
         end
     end
-    Diagonal(v_mass)
+    Diagonal(masses)
 end
 
 function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
@@ -23,13 +23,13 @@ function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
     return out
 end
 
-# solves APₕ = MP₀ via backward Euler, where A = M(I-h*Δ) = M+h*L, L=-MΔ
-function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=eps(T)), solver::Union{Nothing,LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
+# solves APₕ = MP₀ via backward Euler, where A = M(I-h*Δ) = M-h*L, L=+MΔ
+function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=-eps(T)), solver::Union{Nothing,LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
     @assert Dim > 2
     h = convert(T, h)
     vertices = vertices(mesh)
     M = massmatrix(mesh)
-    A = M+h*L
+    A = M-h*L
     P0_dims = splitbydim(vertices)
     
     # solving
