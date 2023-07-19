@@ -2,7 +2,9 @@ const Integer2D{I<:Integer} = Union{NTuple{2,I},AbstractSetwo{I}}
 """
     Int2DDict{M, I<:Integer, K<:Integer2D{I}, V} <: AbstractDict{K,V}
 
-A dictionary datatype optimized for 2D integer-type keys that is dense roughly-uniforml-distributed in the first key dimension. The majority of entries are stored in a key matrix `keymat` and an value matrix `valmat`. Each such entry, `(key1, key2) => val`, has `key2` stored in `keymat[index,key1]` and `val` stored `valmat[index,key1]` where `index ∈ 1:M` is arbitrary. Both matrices are `M`*`isize`, where M is the maximum number of entries in the matrix with the same `key1`, and `1:U`` is range of `key1`` stored that the matrices store. Therefore, both matrices taken together, each column corresponds to a single `key1`, their entries are pairs of `key2` and `val`. The `sizes` field stores each column's usage and is indexed `1:isize`` accordingly.
+A dictionary datatype optimized for 2D integer-type keys that is dense and roughly uniformly-distributed in the first key dimension. 
+
+The majority of entries are stored in a key matrix `keymat` and an value matrix `valmat`. Each such entry, `(key1, key2) => val`, has `key2` stored in `keymat[index,key1]` and `val` stored `valmat[index,key1]` where `index ∈ 1:M` is arbitrary. Both matrices are `M`*`isize`, where M is the maximum number of entries in the matrix with the same `key1`, and `1:U`` is range of `key1`` stored that the matrices store. Therefore, both matrices taken together, each column corresponds to a single `key1`, their entries are pairs of `key2` and `val`. The `sizes` field stores each column's usage and is indexed `1:isize`` accordingly.
 
 The `rest` field is a Dict that stores all other entries that doesn't fit into the matrix, either because `key1 ∉ 1:isize` or the `key1`'s column is full with `M` existing entries. 
 """
@@ -150,6 +152,11 @@ init_dict_sizehint(::Type{Int2DDict{M,I,K,V}}) where {M,I,K,V} = Int2DDict{M,I,K
 
 # abstract type AbstractRelation{K,V} end
 
+"""
+    IntKeyedRelation{M, K<:Integer, V}
+
+A data structure for storing a relation (in the mathematical sense), consisting of ordered pairs or "connections" (key,val), with an integer key type `K`; it can be efficiently "keyed" by the left element to get all connections with that left key (see [`connectionswith`](@ref)). Another view of this data structure is a multi-valued dictionary. The implementation is very similar to [`Int2DDict`](@ref), and is most efficient when the keys are small and densely distributed, and when keys distribution is roughly uniform (i.e. about the same number of pairs stored per key). 
+"""
 struct IntKeyedRelation{M, K<:Integer, V} # <: AbstractRelation{K,V}
     sizes::Vector{UInt8}
     valmat::Matrix{V}
@@ -171,11 +178,13 @@ function IntKeyedRelation{M}(sizes::Vector{UInt8}, valmat::Matrix{V}, rest::Dict
     IntKeyedRelation{M,K,V}(sizes, valmat, rest)
 end
 
+const IntKeyedRelationKV{K,V} = IntKeyedRelation{M,K,V} where {M,K,V}
+
 _isize(R::IntKeyedRelation) = length(R.sizes)
 _iskeyinrange(R::IntKeyedRelation{M,K}, key::K) where {M,K} = 1 <= key <= _isize(R)
 
 # returns a tuple: (is key inbound of matrix, ifso does val exist, ifso the existing row index else the first available slots)
-function relationindex(R::IntKeyedRelation{M,K}, key::K, val::V) where {M,K,V}
+function connectionindex(R::IntKeyedRelation{M,K}, key::K, val::V) where {M,K,V}
     valmat = R.valmat
     
     # key is not inbound of matrix
@@ -191,7 +200,7 @@ function relationindex(R::IntKeyedRelation{M,K}, key::K, val::V) where {M,K,V}
 end
 
 # returns a tuple: (is key in matrix's key range, does key exist, is key in rest, sizes[key])
-function keyusage(R::IntKeyedRelation{M,K}, key::K) where {M,K,V}
+function keyusage(R::IntKeyedRelation{M,K}, key::K) where {M,K}
     if !_iskeyinrange(R,key)
         keyexist = haskey(R.rest,key)
         (false, keyexist, keyexist, zero(UInt8))
@@ -208,20 +217,38 @@ isempty(R::IntKeyedRelation) = all(iszero, dict.sizes) && isempty(R.rest)
 function haskey(R::IntKeyedRelation{M,K}, key::K) where {M,K}
     _iskeyinrange(R,key) ? R.sizes[key]>0 : haskey(R,rest,key)
 end
-nrelationswith(R::IntKeyedRelation{M,K}, key::K) where {M,K} = _iskeyinrange(R,key) ? R.sizes[key] : length(R.rest[key])
-function hasrelation(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
-    isinbound,doesexist,_ = relationindex(R, key, val)
+
+"""
+    nconnectionswith(R::IntKeyedRelation, key)
+
+Return the number of connections in `R` with left element `key`, i.e. the number of values associated with `key`. 
+"""
+nconnectionswith(R::IntKeyedRelation{M,K}, key::K) where {M,K} = _iskeyinrange(R,key) ? R.sizes[key] : length(R.rest[key])
+
+"""
+    hasconnection(R::IntKeyedRelation, key, val)
+
+Determine whether the connection (`key`,`val`) exists in `R`.
+"""
+function hasconnection(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
+    isinbound,doesexist,_ = connectionindex(R, key, val)
     isinbound && return doesexist
     return haskey(R.rest, key) && val in R.rest[key]
 end
-function add_relation!(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
-    isinbound,doesexist,valindex = relationindex(R, key, val)
+
+"""
+    add_connection!(R::IntKeyedRelation, key, val)
+
+Add the connection (`key`,`val`) to `R` if it is not present.
+"""
+function add_connection!(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
+    isinbound,doesexist,valindex = connectionindex(R, key, val)
     if isinbound
         if !doesexist # making slot
             R.valmat[valindex, key] = val
             R.sizes[key] += 1
             @assert R.sizes[key] == valindex
-        end # noop if relation already exists
+        end # noop if connection already exists
     else
         restvals = get!(R.rest,key,V[])
         if val ∉ restvals
@@ -231,11 +258,16 @@ function add_relation!(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
     return R
 end
 
-function _deleteempty!(dict::AbstractDict{K,<:AbstractVector},key::K) where {K}
+function _delete_empty!(dict::AbstractDict{K,<:AbstractVector},key::K) where {K}
     isempty(dict[key]) && delete!(dict, key)
 end
-    
-function popat!(R::IntKeyedRelation{M,K}, key::K) where {M,K}
+
+"""
+    pop_connection_at!(R::IntKeyedRelation, key)
+
+Remove a connection from R that is associated with `key` and return the value of the connection; throw an error if the key is not present.
+"""
+function pop_connection_at!(R::IntKeyedRelation{M,K}, key::K) where {M,K}
     isinrange,doesexist,isinrest,nvals = keyusage(R, key)
     if isinrange
         !doesexist && throw(KeyError(key))
@@ -246,12 +278,17 @@ function popat!(R::IntKeyedRelation{M,K}, key::K) where {M,K}
         end
     end
     val = pop!(R.rest[key])
-    _deleteempty!(R.rest, key)
+    _delete_empty!(R.rest, key)
     val
 end
 
-function delete_relation!(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
-    isinbound,doesexist,valindex = relationindex(R, key, val)
+"""
+    delete_connection!(R::IntKeyedRelation, key, val)
+
+Remove the connection (`key`,`val`) from R if it is present. 
+"""
+function delete_connection!(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K,V}
+    isinbound,doesexist,valindex = connectionindex(R, key, val)
     valmat = R.valmat
     if isinbound
         if doesexist
@@ -266,18 +303,24 @@ function delete_relation!(R::IntKeyedRelation{M,K,V}, key::K, val::V) where {M,K
                 valmat[M,key] = popfirst!(R.rest[key])
                 _deleteempty!(R.rest,key)
             end
-        end # noop elseif relation doesn't exists
+        end # noop elseif connection doesn't exists
     else
         vals = R.rest[key]
         ind = findfirst(==(val), vals)
         if !isnothing(ind)
             deleteat!(vals,ind)
             _deleteempty!(R.rest, key)
-        end # noop elseif relation doesn't exists
+        end # noop elseif connection doesn't exists
     end
     return R
 end
-function relationswith(R::IntKeyedRelation{M,K}, key::K) where{M,K}
+
+"""
+    connectionswith(R::IntKeyedRelation, key)
+
+Return an iterator over all values associated with key in `R`. 
+"""
+function connectionswith(R::IntKeyedRelation{M,K}, key::K) where{M,K}
     isinrange,doesexist,isinrest,nvals = keyusage(R, key)
     if isinrange
         !doesexist && throw(KeyError(key))
@@ -296,14 +339,14 @@ end
 function IntKeyedRelation{M}(pairs::Pair{K,V}...) where {M,K,V}
     R = IntKeyedRelation{M,K,V}()
     for (k,v) in pairs
-        add_relation!(R, k, v)
+        add_connection!(R, k, v)
     end
     R
 end
 function IntKeyedRelation{M,K,V}(pairs::Pair...) where {M,K,V}
     R = IntKeyedRelation{M,K,V}()
     for (k,v) in pairs
-        add_relation!(R, convert(K,k), convert(V,v))
+        add_connection!(R, convert(K,k), convert(V,v))
     end
     R
 end
@@ -326,7 +369,7 @@ end
 function inverse(R::IntKeyedRelation{M,K,V}, isize::Integer=maximum(values(R)), ::Val{M_inv}=Val(M)) where {M,M_inv,K,V}
     R_inv = IntKeyedRelation{M_inv,V,K}(isize)
     for (key::K,val::V) in iterator(R)
-        add_relation!(R_inv, val, key)
+        add_connection!(R_inv, val, key)
     end
     @assert length(R) == length(R_inv)
     return R_inv

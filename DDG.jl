@@ -78,14 +78,14 @@ edges_tocollapse,edges_seam = collapse_short_edges!(mesh)
 center_vertices!(mesh)
 mesh_collapse = deepcopy(mesh)
 
-# submesh = subset(mesh_collapse, flood_traversal(mesh_collapse, FID, FFIterator, bothface(mesh_collapse,EID(710)), 10))
+# submesh = subset(mesh_collapse, flood_traversal(mesh_collapse, FID, _FFIterator, bothface(mesh_collapse,EID(710)), 10))
 # display(GLMakie.Screen(), vizsub(submesh,0.05,showfacets=true))
 
-# submesh = subset(mesh_split, flood_traversal(mesh_split, FID, FFIterator, bothface(mesh_split,EID(135238)), 1))
+# submesh = subset(mesh_split, flood_traversal(mesh_split, FID, _FFIterator, bothface(mesh_split,EID(135238)), 1))
 # display(GLMakie.Screen(), vizsub(submesh,0.1,showfacets=true))
 
 # facetcolor = color_edges(mesh_split,:black,edges_tocollapse,:red)
-# submesh = subset(mesh_split, flood_traversal(mesh_split, FID, FFIterator, bothface(mesh_split,_edge(HID(1663))), 10))
+# submesh = subset(mesh_split, flood_traversal(mesh_split, FID, _FFIterator, bothface(mesh_split,_edge(HID(1663))), 10))
 # facetcolor = color_edges(mesh_split,:black,_edge.(submesh.hids),:red)
 # GLMakie.activate!(title="Pre-collapse")
 # resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
@@ -131,6 +131,6 @@ function vizsub(submesh::IHSubMesh, zoom; kwargs...)
     zoom!(plt.axis.scene, zoom)
     plt
 end
-submesh = subset(gourd,flood_traversal(gourd,FIFIterator,FID(300),2))
+submesh = subset(gourd,flood_traversal(gourd,FFIterator,FID(300),2))
 vizsub(submesh,showfacets=true)
 # cameracontrols!(plt.axis,cam)

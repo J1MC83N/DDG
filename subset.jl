@@ -183,7 +183,15 @@
 # flood_traversal(st::IHStructure, f_iter_neighbors::Base.Callable, start::H, radius::Integer) where {H<:Handle} = flood_traversal(st, H, f_iter_neighbors, (start,), radius)
 
 
+"""
+    struct IHHandleMap
+        hidmap::Dict{HID, HID}
+        vidmap::Dict{VID, VID}
+        fidmap::Dict{FID, FID}
+    end
 
+A struct of three Dicts mapping each id to a new id. 
+"""
 struct IHHandleMap
     hidmap::Dict{HID, HID}
     vidmap::Dict{VID, VID}
@@ -259,11 +267,12 @@ function _subset(topo::IHTopology{N}, fids) where N
         _,newhid_next = pop!(V2VHs_boundary[newvid_to])
         subtopo.h2next[newhid] = newhid_next
     end
-    return subtopo,hidmap,vidmap,fidmap
+    return subtopo,IHHandleMap(hidmap,vidmap,fidmap)
 end
-subset(topo::IHTopology{N}, fids) where N = _subset(topo, fids)[1]
+subset(topo::IHTopology{N}, fids) where N = _subset(topo, fids)[1]::IHTopology{N}
 function subset(mesh::T, fids) where T<:IHMesh
-    subtopo,_,vidmap,_ = _subset(topology(mesh), fids)
+    subtopo,idmaps = _subset(topology(mesh), fids)
+    vidmap = idmaps.vidmap
     verts = vertices(mesh)
     subverts = similar(verts, length(vidmap))
     for (vid,newvid) in vidmap
@@ -273,10 +282,19 @@ function subset(mesh::T, fids) where T<:IHMesh
 end
 
 
+"""
+    struct IHHandleRelation
+        hidrel::IntKeyedRelationKV{HID, HID}
+        vidrel::IntKeyedRelationKV{VID, VID}
+        fidrel::IntKeyedRelationKV{FID, FID}
+    end
+
+A struct of three id relations, respectively for halfedge, vertex and face ids. Serves as a record for arbitrary topology transformations. 
+"""
 struct IHHandleRelation
-    hidrel::IntKeyedRelation{M, HID, HID} where M
-    vidrel::IntKeyedRelation{M, VID, VID} where M
-    fidrel::IntKeyedRelation{M, FID, FID} where M
+    hidrel::IntKeyedRelationKV{HID, HID}
+    vidrel::IntKeyedRelationKV{VID, VID}
+    fidrel::IntKeyedRelationKV{FID, FID}
 end
 function IHHandleRelation(isizes::NTuple{3,Integer}, Ms::NTuple{3,Int}=(1,1,1))
     hidrel = IntKeyedRelation{Ms[1],HID,HID}(isizes[1])
@@ -285,5 +303,3 @@ function IHHandleRelation(isizes::NTuple{3,Integer}, Ms::NTuple{3,Int}=(1,1,1))
     return IHHandleRelation(hidrel, vidrel, fidrel)
 end
 IHHandleRelation(topo::IHTopology, Ms::NTuple{3,Int}=(1,1,1)) = IHHandleRelation(nhvf(topo),Ms)
-
-

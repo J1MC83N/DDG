@@ -1,5 +1,15 @@
 include("laplacematrix.jl")
-# massmatrix(mesh::IHTriMesh) = Diagonal([barycentric_dual_area(mesh, vid) for vid in vertexids(mesh)])
+
+
+"""
+    massmatrix(mesh::IHTriMesh)
+
+Construct the mass matrix of mesh, equivalent to (within floating point error):
+
+```julia
+Diagonal([barycentric_dual_area(mesh, vid) for vid in vertexids(mesh)])
+```
+"""
 function massmatrix(mesh::IHTriMesh{Dim,T}) where {Dim,T}
     masses = zeros(T, nvertices(mesh))
     for fid in faceids(mesh)
@@ -10,6 +20,7 @@ function massmatrix(mesh::IHTriMesh{Dim,T}) where {Dim,T}
     end
     Diagonal(masses)
 end
+# massmatrix(mesh::IHTriMesh) = Diagonal([barycentric_dual_area(mesh, vid) for vid in vertexids(mesh)])
 
 function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
     np = length(points)
@@ -23,7 +34,19 @@ function splitbydim(points::AbstractVector{Point{Dim,T}}) where {Dim,T}
     return out
 end
 
-# solves APₕ = MP₀ via backward Euler, where A = M(I-h*Δ) = M-h*L, L=+MΔ
+
+"""
+mean_curvature_flow!(mesh::IHTriMesh, h::Real; L=laplacematrix(mesh, shift=-eps(T)), solver=KrylovJL_CG())
+
+Perform mean curvature flow on `mesh` with timestep `h`. Optionally take keyword argument `L` if it was precomputed or reused.
+
+Works by solving APₕ = MP₀ via backward Euler, where: 
+
+- M is the mass matrix (see [`massmatrix`](@ref)),
+- P₀ and Pₕ are the condensed position matrices before and after one timestep of the flow,
+- L is the Laplacian matrix (see [`laplacematrix`](@ref)),
+- A is the main operator matrix, A = M(I-hΔ) = M-hL, L=MΔ
+"""
 function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=-eps(T)), solver::Union{Nothing,LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
     @assert Dim > 2
     h = convert(T, h)

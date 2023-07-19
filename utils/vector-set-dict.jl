@@ -1,8 +1,9 @@
 using DataStructures: IntSet, findnextidx
-"""
-    struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
 
-Thin wrapper around `IntSet` from DataStructures that supports arbitrary Unsigned integer types. 
+"""
+    UnsignedSet{T<:Unsigned} <: AbstractSet{T}
+
+Thin wrapper around DataStructures's `IntSet` that supports arbitrary Unsigned integer types. 
 """
 struct UnsignedSet{T<:Unsigned} <: AbstractSet{T}
     data::IntSet
@@ -48,7 +49,11 @@ function hasintersection(s::UnsignedSet{T}, itr) where T
     return false
 end
 
+"""
+    UnsignedDict{K<:Unsigned,V} <: AbstractDict{K,V}
 
+Specialized array-backed dictonary for storing key=>value pairs with densely-distributed, small Unsigned keys. 
+"""
 struct UnsignedDict{K<:Unsigned,V} <: AbstractDict{K,V}
     keys::UnsignedSet
     values::Vector{V}

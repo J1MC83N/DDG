@@ -1,8 +1,9 @@
 using LinearAlgebra, SparseArrays, LinearSolve, DataStructures
 
-const ImplicitHalfEdgeMesh{Dim,T,V<:AbstractVector{Point{Dim,T}},N} = SimpleMesh{Dim,T,V,ImplicitHalfEdgeTopology{N}}
+const ImplicitHalfEdgeMesh{Dim,T,V<:AbstractVector{Point{Dim,T}},N} = SimpleMesh{Dim,T,V,IHTopology{N}}
 const IHMesh = ImplicitHalfEdgeMesh
 const IHMeshN{N} = IHMesh{Dim,T,V,N} where {Dim,T,V}
+"""Type alias for trigular IHMesh"""
 const IHTriMesh = IHMeshN{3}
 IHMesh(P::V, topo::IHTopology{N}) where {Dim,T,V<:AbstractVector{Point{Dim,T}},N} = IHMesh{Dim,T,V,N}(P,topo)
 IHTriMesh(P::V, topo::IHTopology{3}) where {Dim,T,V<:AbstractVector{Point{Dim,T}}} = IHTriMesh{Dim,T,V}(P,topo)
@@ -74,11 +75,11 @@ function IHMesh(filename::AbstractString; check_orientability::Bool=true, show_p
     IHMesh(vertices, IHTopology{N}(faces, length(vertices); check_orientability, show_progress))
 end
 
-for VXIterator in [:VHIterator, :VVIterator, :VFIterator, :VIFIterator, :VCIterator, :VICIterator]
+for VXIterator in [:VHIterator, :VVIterator, :_VFIterator, :VFIterator, :_VCIterator, :VCIterator]
     @eval $VXIterator(mesh::IHMesh, v::VID) = $VXIterator(topology(mesh),v)
 end
 vertexdegree(mesh::IHMesh,vid::VID) = vertexdegree(topology(mesh),vid)
-for FXIterator in [:FHIterator, :FVIterator, :FFIterator, :FIFIterator, :FCIterator]
+for FXIterator in [:FHIterator, :FVIterator, :_FFIterator, :FFIterator, :FCIterator]
     @eval $FXIterator(mesh::IHMesh, f::FID) = $FXIterator(topology(mesh),f)
 end
 
@@ -160,7 +161,7 @@ function dihedral_angle_diamond(mesh::IHMesh{3},v1::VID,v2::VID,u1::VID,u2::VID)
     _dihedral_angle_diamond(pv1,pv2,pu1,pu2)
 end
 
-barycentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T} = sum(f->area(mesh,f), VIFIterator(mesh,v))/3
+barycentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T} = sum(f->area(mesh,f), VFIterator(mesh,v))/3
 
 function cotan_sum(mesh::IHTriMesh{Dim,T}, h::HID) where {Dim,T}
     s = zero(T)
@@ -184,13 +185,13 @@ vertex_normal(mesh::Mesh, v::VID, method::VertexNormalMethod) = normalize(sum(vn
 vertex_normal_scaled(mesh::Mesh, v::VID, method::VertexNormalMethod) = sum(vn_fun_iter(mesh,v,method)...)
 
 struct EquallyWeighted <: VertexNormalMethod end
-vn_fun_iter(mesh::Mesh, v::VID, ::EquallyWeighted) = (f::FID->normal(mesh,f), VIFIterator(mesh, v))
+vn_fun_iter(mesh::Mesh, v::VID, ::EquallyWeighted) = (f::FID->normal(mesh,f), VFIterator(mesh, v))
 
 struct AreaWeighted <: VertexNormalMethod end
-vn_fun_iter(mesh::Mesh, v::VID, ::AreaWeighted) = (f::FID->area(mesh,f)*normal(mesh,f), VIFIterator(mesh, v))
+vn_fun_iter(mesh::Mesh, v::VID, ::AreaWeighted) = (f::FID->area(mesh,f)*normal(mesh,f), VFIterator(mesh, v))
 
 struct AngleWeighted <: VertexNormalMethod end
-vn_fun_iter(mesh::Mesh, v::VID, ::AngleWeighted) = (c::CID->∠(mesh,c)*normal(mesh,face(mesh,c)), VICIterator(mesh, v))
+vn_fun_iter(mesh::Mesh, v::VID, ::AngleWeighted) = (c::CID->∠(mesh,c)*normal(mesh,face(mesh,c)), VCIterator(mesh, v))
 
 struct GuassCurvature <: VertexNormalMethod end
 function vn_fun_iter(mesh::Mesh, v::VID, ::GuassCurvature)

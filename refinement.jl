@@ -156,7 +156,7 @@ function _vertex_quadatric(fids,planecache::AbstractVector{V}) where {T,V<:Vec{4
     return B,w
 end
 function merged_position(mesh::IHTriMesh{3,T},v1::VID,v2::VID,planecache::PC) where {T,PC<:AbstractVector{Vec{4,T}}}
-    fids_neighbor = Iterators.flatten((VIFIterator(mesh,v1),VIFIterator(mesh,v2)))
+    fids_neighbor = Iterators.flatten((VFIterator(mesh,v1),VFIterator(mesh,v2)))
     B,w = _vertex_quadatric(fids_neighbor,planecache)
     # sol = B\w
     I4 = SVector{4,T}(0,0,0,1)
@@ -237,7 +237,7 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
             v,es1,es2 = collapseedge!(topology(mesh),e,hids_delete,vids_delete,fids_delete)
             positions[v] = newpos
             # @infiltrate e == 61014
-            for fid in VIFIterator(mesh,v)
+            for fid in VFIterator(mesh,v)
                 planecache[fid] = plane_equation(mesh[fid])
             end
             push!(vids_covered,v1,v2,u1,u2)

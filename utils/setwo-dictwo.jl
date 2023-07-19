@@ -18,6 +18,11 @@ show(io::IO, s::T) where T<:AbstractSetwo = print(io, "$T($(first(s)),$(last(s))
 @inline Tuple(s::AbstractSetwo) = (first(s),last(s))
 
 
+"""
+    Setwo{T} <: AbstractSetwo{T}
+    
+A generic implementation of a set of two elements.
+"""
 struct Setwo{T} <: AbstractSetwo{T}
     data::NTuple{2,T}
     function Setwo{T}(data::NTuple{2,T}) where T
@@ -34,36 +39,36 @@ default_setwo_type(::Type{T}) where T = Setwo{T}
 @inbounds first(s::Setwo) = s.data[1]
 @inbounds last(s::Setwo) = s.data[2]
 
+"""
+    HandleSetwo{T<:Handle} <: AbstractSetwo{T}
 
-if !isdefined(Main,:Handle)
-    @warn "Handle type are undefined; skipping definitions of HandleSetwo"
-else
-    struct HandleSetwo{T<:Handle} <: AbstractSetwo{T}
-        data::UInt128
-        function HandleSetwo{T}(data::UInt128) where T
-            a,b = data % UInt128(zero(UInt64)-1), data >> 64
-            return new(a <= b ? data : a<<64 | b)
-        end
-        function HandleSetwo{T}(a::T,b::T) where T<:Handle
-            a128,b128 = UInt128(a),UInt128(b)
-            return new(a <= b ? a128<<64|b128 : b128<<64|a128)
-        end
+A set of two Handle-type elements.
+"""
+struct HandleSetwo{T<:Handle} <: AbstractSetwo{T}
+    data::UInt128
+    function HandleSetwo{T}(data::UInt128) where T
+        a,b = data % UInt128(zero(UInt64)-1), data >> 64
+        return new(a <= b ? data : a<<64 | b)
     end
-    HandleSetwo(a::T,b::T) where T<:Handle = HandleSetwo{T}(a,b)
-    HandleSetwo{T}(a::Integer,b::Integer) where T<:Handle = HandleSetwo{T}(T(a),T(b))
-    HandleSetwo{T}(data::NTuple{2,T}) where T<:Handle = HandleSetwo{T}(data...)
-    default_setwo_type(::Type{T}) where T<:Handle = HandleSetwo{T}
-    # define type alias for HandleSetwo of specific handle types
-    # i.e. HIDSetwo => HandleSetwo{HalfEdgeHandle}
-    for (tname,alias) in _Handle2Alias
-        @eval const $(Symbol(alias,"Setwo")) = HandleSetwo{$tname}
+    function HandleSetwo{T}(a::T,b::T) where T<:Handle
+        a128,b128 = UInt128(a),UInt128(b)
+        return new(a <= b ? a128<<64|b128 : b128<<64|a128)
     end
-
-    @inline first(s::HandleSetwo{T}) where T<:Handle = (s.data>>64) % T
-    @inline last(s::HandleSetwo{T}) where T<:Handle = s.data % T
-    import Base: hash
-    hash(s::HandleSetwo{T},h::UInt) where T = hash(first(s),hash(last(s),h))
 end
+HandleSetwo(a::T,b::T) where T<:Handle = HandleSetwo{T}(a,b)
+HandleSetwo{T}(a::Integer,b::Integer) where T<:Handle = HandleSetwo{T}(T(a),T(b))
+HandleSetwo{T}(data::NTuple{2,T}) where T<:Handle = HandleSetwo{T}(data...)
+default_setwo_type(::Type{T}) where T<:Handle = HandleSetwo{T}
+# define type alias for HandleSetwo of specific handle types
+# i.e. HIDSetwo => HandleSetwo{HalfEdgeHandle}
+for (tname,alias) in _Handle2Alias
+    @eval const $(Symbol(alias,"Setwo")) = HandleSetwo{$tname}
+end
+
+@inline first(s::HandleSetwo{T}) where T<:Handle = (s.data>>64) % T
+@inline last(s::HandleSetwo{T}) where T<:Handle = s.data % T
+import Base: hash
+hash(s::HandleSetwo{T},h::UInt) where T = hash(first(s),hash(last(s),h))
 
 
 """ A wrapper for directly constructing a Dict{K,V} with a sizehint 
@@ -76,10 +81,11 @@ end
 
 init_dict_sizehint(::Type{D}) where D<:AbstractDict = error("Unknown dictionary type $D for initializing with sizehint")
 init_dict_sizehint(::Type{Dict{K,V}}) where {K,V} = EmptyDict{K,V}
+
 """
     Dictwo{K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}} <: AbstractDict{K,Union{V,S}}
 
-A dictionary type that stores one or two values for each key. Implemented with two dictionaries, one for single values and the other for two values. A key cannot exist in both dictionaries at once. 
+A dictionary type that stores either one or two values per key. Implemented with two dictionaries, one for keys with a single associated value and the other for keys with two values. A key cannot exist in both dictionaries at once. 
 """
 struct Dictwo{K,V,S<:AbstractSetwo{V},DV<:AbstractDict{K,V},DS<:AbstractDict{K,S}} <: AbstractDict{K,Union{V,S}}
     K21V::DV

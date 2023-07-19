@@ -145,6 +145,7 @@ prev_interior_loop(topo::IHTopology{0},hid::HID) = prev_loop(topo, hid)
 end
     
 # the id of a corner is equal to that of the incoming halfedge, as a corner consists of an incoming and an outcoming halfedge
+corner(::IHTopology, hid::HID) = CID(hid)
 halfedge(::IHTopology,cid::CID) = HID(cid)
 @propagate_inbounds next(topo::IHTopology,cid::CID) = topo.h2next[HID(cid)]|>CID
 @propagate_inbounds vertex(topo::IHTopology,cid::CID) = headvertex(topo,HID(cid))
@@ -164,12 +165,13 @@ const _IH_PRIMARY_METHODS = [
     (:face,HID),(:face,CID),
     (:halfedge,VID),(:halfedge,FID),(:halfedge,CID),(:halfedge,EID),
     (:edge,HID),(:edge,VID),(:edge,FID),
+    (:corner,HID),
     (:unsafe_opp_corner,HID),(:opp_corner,HID),
     (:unsafe_opp_halfedge,CID),(:opp_halfedge,CID),
 ]
 
 const _IH_SECONDARY_METHODS = [
-    (:bothvertex,EID),(:bothedge,EID),(:bothface,EID),
+    (:bothvertex,EID),(:bothhalfedge,EID),(:bothface,EID),
 ]
 
 
@@ -287,13 +289,13 @@ end
 """Constructs an iterator over all neighboring vertices of a vertex."""
 VVIterator(topo::IHTopology,v::VID) = imap(∂headvertex(topo),VHIterator(topo,v))
 """Constructs an iterator over all adjacent faces of a vertex; if the vertex is on a boundary, the external face with be included as a `nothing` term."""
-VFIterator(topo::IHTopology,v::VID) = imap(∂face(topo),VHIterator(topo,v))
+_VFIterator(topo::IHTopology,v::VID) = imap(∂face(topo),VHIterator(topo,v))
 """Constructs an iterator over all adjacent (internal) faces of a vertex."""
-VIFIterator(topo::IHTopology,v::VID) = Iterators.filter(!isnothing,imap(∂face(topo),VHIterator(topo,v)))
+VFIterator(topo::IHTopology,v::VID) = Iterators.filter(!isnothing,imap(∂face(topo),VHIterator(topo,v)))
 """Constructs an iterator over all adjacent corners of a vertex; this include any outward-facing boundary corners."""
-VCIterator(topo::IHTopology,v::VID) = imap(h->CID(twin(topo,h)),VHIterator(topo,v))
+_VCIterator(topo::IHTopology,v::VID) = imap(h->CID(twin(topo,h)),VHIterator(topo,v))
 """Constructs an iterator over all adjacent (internal) corners of a vertex."""
-VICIterator(topo::IHTopology, v::VID) = (CID(twin(topo,h)) for h in VHIterator(topo,v) if !isnothing(face(topo,h)))
+VCIterator(topo::IHTopology, v::VID) = (CID(twin(topo,h)) for h in VHIterator(topo,v) if !isnothing(face(topo,h)))
 
 const VH_MAX_DEGREE = typemax(UInt8)
 mutable struct VHIterator_Tracked
@@ -351,9 +353,9 @@ end
 """Iterator over all vertices of a face."""
 FVIterator(topo::IHTopology{N}, f::FID) where N = imap(∂headvertex(topo),FHIterator{N}(topo,f))
 """Iterator over all adjacent faces of a face; if the face is on a boundary, the external face with be included as a `nothing` term."""
-FFIterator(topo::IHTopology{N}, f::FID) where N = imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f))
+_FFIterator(topo::IHTopology{N}, f::FID) where N = imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f))
 """Iterator over all adjacent (internal) faces of a face."""
-FIFIterator(topo::IHTopology{N}, f::FID) where N = Iterators.filter(!isnothing, imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f)))
+FFIterator(topo::IHTopology{N}, f::FID) where N = Iterators.filter(!isnothing, imap(h->face(topo,twin(topo,h)),FHIterator{N}(topo,f)))
 """Constructs an iterator over all edges of a face."""
 FEIterator(topo::IHTopology{N}, f::FID) where N = imap(_edge, FHIterator{N}(topo,f))
 """Constructs an iterator over all corners of a face."""
@@ -362,8 +364,8 @@ FCIterator(topo::IHTopology{N}, f::FID) where N = imap(CID,FHIterator{N}(topo,f)
 @fix1able isboundary
 isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
 isboundary(topo::IHTopology, e::EID) = @fix1topo isboundary(_halfedge(e)) | isboundary(twin(_halfedge(e)))
-isboundary(topo::IHTopology, f::FID) = any(isnothing,FFIterator(topo,f))
-isboundary(topo::IHTopology, v::VID) = any(isnothing,VFIterator(topo,v))
+isboundary(topo::IHTopology, f::FID) = any(isnothing,_FFIterator(topo,f))
+isboundary(topo::IHTopology, v::VID) = any(isnothing,_VFIterator(topo,v))
 
 function find_halfedge(topo::IHTopology,v1::Integer,v2::Integer)
     for h in VHIterator(topo,VID(v1))
@@ -718,6 +720,7 @@ flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
 
 """
     makeroom!(v::Vector, delta::Integer, indextype)
+
 Grow end of `v` by `delta` and return new indices as a range of type `indextype`
 """
 function makeroom!(v::Vector, delta::Integer, indextype::Type{IT}) where IT<:Integer
