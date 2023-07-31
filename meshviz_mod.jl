@@ -1,9 +1,8 @@
-# Base.convert(::Type{HalfEdgeTopology}, t::HalfEdgeTopology) = t
-using GLMakie
-using MeshViz
-GLMakie.Makie.inline!(false)
 
 import MeshViz: vizmesh2D!, process
+
+# Base.convert(::Type{HalfEdgeTopology}, t::HalfEdgeTopology) = t
+
 # Makie.plottype(::IHSubMesh) = Viz{<:Tuple{IHSubMesh}}
 # function Makie.point_iterator(list::ReindexedVector)
 #     return collect(list)
@@ -172,3 +171,21 @@ function vizmesh2D!(plot::Combined{MeshViz.viz, Tuple{T}}) where T<:IHMesh # whe
         )
     end
 end
+
+
+function color_edges(mesh::IHTriMesh,default,edges_colors...)
+    facetcolor = fill(default,nedges(mesh)*3)
+    for (edges,color) in edges_colors
+        if eltype(edges) == HID
+            for h::HID in edges, i in 0:2
+                facetcolor[3*_edge(h)-i] = color
+            end
+        else
+            for e::EID in edges, i in 0:2
+                facetcolor[3*e-i] = color
+            end
+        end
+    end
+    return facetcolor
+end
+

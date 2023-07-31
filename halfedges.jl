@@ -39,7 +39,7 @@ Philosophy adopted from here: https://geometry-central.net/surface/surface_topo/
 struct ImplicitHalfEdgeTopology{N} <: Topology
     h2next  :: Vector{HID}
     h2v     :: Vector{VID}
-    h2f     :: Vector{Union{FID,Nothing}}
+    h2f     :: Vector{Maybe{FID}}
     v2h     :: Vector{HID}
     f2h     :: Vector{HID}
 end
@@ -47,7 +47,7 @@ const IHTopology = ImplicitHalfEdgeTopology
 function IHTopology{N}(nh::Integer,nv::Integer,nf::Integer) where N
     h2next = zeros(HID, nh)
     h2v    = zeros(VID, nh)
-    h2f    = Vector{Union{FID,Nothing}}(undef, nh)
+    h2f    = Vector{Maybe{FID}}(undef, nh)
     v2h    = zeros(HID, nv)
     f2h    = zeros(HID, nf)
     return IHTopology{N}(h2next, h2v, h2f, v2h, f2h)
@@ -520,7 +520,7 @@ function IHTopology{N}(polys::Vector{F}, nv::Int=Int(maximum(maximum,polys)); ch
     nh = 2ne
     h2next = zeros(VID,nh)
     h2v = zeros(VID,nh)
-    h2f = Vector{Union{FID,Nothing}}(undef,nh); fill!(h2f,zero(FID))
+    h2f = Vector{Maybe{FID}}(undef,nh); fill!(h2f,zero(FID))
     v2h = zeros(HID,nv)
     f2h = zeros(HID,nf)
     
@@ -628,8 +628,8 @@ end
 #     vertex  :: VID
 #     next    :: HID
 #     twin    :: HID
-#     face    :: Union{FID,Nothing}
-#     HalfEdge(vertex::Integer, next::Integer, twin::Integer, face::Union{Integer,Nothing}=nothing) = new(vertex, next, twin, face)
+#     face    :: Maybe{FID}
+#     HalfEdge(vertex::Integer, next::Integer, twin::Integer, face::Maybe{Integer}=nothing) = new(vertex, next, twin, face)
 # end
 
 # function HalfEdge(topo::IHTopology, hid::HID)
@@ -641,7 +641,7 @@ end
 # twin(topo::IHTopology,h::HalfEdge) = HalfEdge(topo,h.twin)
 
 
-################################ Topology modification ##################################
+
 
 function graphviz(topo::IHTopology;title="",engine="sfdp")
     buffer = IOBuffer(append=true)
@@ -662,175 +662,4 @@ function graphviz(topo::IHTopology;title="",engine="sfdp")
         $(String(take!(buffer)))
     }
     """ |> clipboard
-end
-
-macro assign_vars_diamond(topo,eid)
-    quote
-        # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
-        h1::HID,h2::HID = _bothhalfedge($eid)
-        h11::HID,h21::HID = @fix1 $topo (next(h1), next(h2))
-        h12::HID,h22::HID = @fix1 $topo (next(h11), next(h21))
-        f1::FID,f2::FID = @fix1 $topo (face(h1), face(h2))
-        v1::VID,v2::VID = @fix1 $topo (vertex(h1), vertex(h2))
-        u1::VID,u2::VID = @fix1 $topo (vertex(h12), vertex(h22))
-    end |> esc
-end
-
-@propagate_inbounds function form_triangle!(topo::IHTopology,f::FID,v1::VID,v2::VID,v3::VID,h1::HID,h2::HID,h3::HID)
-    @unpack h2next,h2v,h2f,v2h,f2h = topo
-    h2next[h1] = h2
-    h2next[h2] = h3
-    h2next[h3] = h1
-    h2v[h1] = v1
-    h2v[h2] = v2
-    h2v[h3] = v3
-    h2f[h1] = h2f[h2] = h2f[h3] = f
-    v2h[v1] = h1
-    v2h[v2] = h2
-    v2h[v3] = h3
-    f2h[f] = h1
-end
-
-function flipedge!(topo::IHTopology{3}, e::EID)
-    @assert e in edgeids(topo)
-    @assert !isboundary(topo, e)
-    
-    # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
-    @assign_vars_diamond topo e
-    
-    form_triangle!(topo,f1,u1,u2,v2,h1,h22,h11)
-    form_triangle!(topo,f2,u2,u1,v1,h2,h12,h21)
-    
-    # for (h,hnext) in ((h1,h22), (h2,h12), (h11,h1), (h21,h2), (h12,h21), (h22,h11))
-    #     topo.h2next[h] = hnext
-    # end
-    # for (h,f) in ((h11,f1), (h22,f1), (h12,f2), (h21,f2))
-    #     topo.h2f[h] = f
-    # end
-    # topo.h2v[h1] = vertex(topo, h12)
-    # topo.h2v[h2] = vertex(topo, h22)
-    # topo.f2h[f1] = h1
-    # topo.f2h[f2] = h2
-    # topo.v2h[v1] = h21
-    # topo.v2h[v2] = h11
-    return topo
-end
-flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
-    
-
-"""
-    makeroom!(v::Vector, delta::Integer, indextype)
-
-Grow end of `v` by `delta` and return new indices as a range of type `indextype`
-"""
-function makeroom!(v::Vector, delta::Integer, indextype::Type{IT}) where IT<:Integer
-    lv = length(v)
-    Base._growend!(v, delta)
-    return IT(lv+1):IT(lv+delta)
-end
-
-function splitedge!(topo::IHTopology{3}, e::EID)
-    @assert e in edgeids(topo)
-    @assert !isboundary(topo, e)
-    
-    # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
-    @assign_vars_diamond topo e
-    
-    # making room in topo interal storage, assigning handles for new objects
-    @unpack h2next,h2v,h2f,v2h,f2h = topo
-    h1_,h2_,w1,w1_,w2,w2_ = makeroom!(h2next, 6, HID)
-    Base._growend!(h2v, 6)
-    Base._growend!(h2f, 6)
-    v, = makeroom!(v2h, 1, VID)
-    f1_,f2_ = makeroom!(f2h, 2, FID)
-    
-    form_triangle!(topo,f1,v1,v,u1,h1,w1,h12)
-    form_triangle!(topo,f2,v2,v,u2,h2_,w2,h22)
-    form_triangle!(topo,f1_,v,v2,u1,h1_,h11,w1_)
-    form_triangle!(topo,f2_,v,v1,u2,h2,h21,w2_)
-    
-    return v,e,_edge(h1_)
-end
-splitedge!(topo::IHTopology{3}, h::HID) = splitedge!(topo, _edge(h))
-
-
-# """ Check of halfedge is part of a "pinch" triangle, i.e. either of two triangles that share two edges. Adapted from Geometry Central's `collapseEdgeTriangular`.
-# """
-# function ispinch(topo::IHTopology{3}, h0::HID)
-#     for h1 in VHIterator(topo,headvertex(topo,h0)), h2 in VHIterator(topo,headvertex(topo,h1))
-#         # going around a face interior
-#         @fix1topo next(h0)==h1 && next(h1) == h2 && continue
-#         # going around a face exterior (twins of interior next loop)
-#         @fix1topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
-#         @fix1topo headvertex(h2) == vertex(h0) && return true
-#     end
-#     return false
-# end
-# function ispinch(topo::IHTopology{3}, e::EID)
-#     h1,h2 = _bothhalfedge(e)
-#     ispinch(topo, h1) || ispinch(topo, h2)
-# end
-# ispinch(topo::IHTopology{3}, f::FID) = ispinch(topo, halfedge(topo, f))
-# @fix1able ispinch
-
-function are_bothface_overlapping(topo::IHTopology{3}, e::EID)
-    h11,h21 = _bothhalfedge(e)
-    h12,h22 = @fix1topo next(h11),next(h21)
-    v13,v23 = @fix1topo headvertex(h12),headvertex(h22)
-    return @fix1topo vertex(h11)==vertex(h22) && vertex(h12)==vertex(h21) && v13==v23
-end
-
-@propagate_inbounds function reassign_vid_to!(topo::IHTopology, vid::VID, vid_::VID)
-    # everything that had vid now has vid_
-    hs = collect(VHIterator(topo, vid))
-    for (h,h_) in zip(VHIterator(topo, vid),hs)
-        @assert h==h_
-        topo.h2v[h] = vid_
-    end
-    
-    # every property vid_ had replaced with everything vid has
-    topo.v2h[vid_] = vid
-    
-    topo
-end
-@propagate_inbounds function reassign_interior_hid_to!(topo::IHTopology{3}, hid::HID, hid_::HID)
-    # everything that had hid now has hid_
-    topo.h2next[prev_interior_loop(topo, hid)] = hid_
-    topo.v2h[vertex(topo, hid)] = hid_
-    topo.f2h[face(topo, hid)] = hid_
-    
-    # every property hid_ had replaced with everything hid has
-    topo.h2next[hid_] = topo.h2next[hid]
-    topo.h2v[hid_] = topo.h2v[hid]
-    topo.h2f[hid_] = topo.h2f[hid]
-    
-    return topo
-end
-
-function collapseedge!(topo::IHTopology{3}, e::EID, hids_delete, vids_delete, fids_delete)
-    @assert !isboundary(topo, e)
-    h1,h2 = _bothhalfedge(e)
-    # @assert @fix1topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
-    
-    @assign_vars_diamond topo e
-    h12_,h22_ = _twin(h12), _twin(h22)
-    
-    topo.v2h[v1] = h12_ # know to have base vertex v1
-    reassign_vid_to!(topo, v2, v1)
-    
-    topo.v2h[u1] = _twin(h11)
-    topo.v2h[u2] = _twin(h21)
-    reassign_interior_hid_to!(topo, h12_, h11)
-    reassign_interior_hid_to!(topo, h22_, h21)
-    
-    push!(hids_delete, h1, h2, h12, h22, h12_, h22_)
-    push!(vids_delete, v2)
-    push!(fids_delete, f1, f2)
-    
-    topo.h2next[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
-    topo.h2v[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
-    topo.h2f[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
-    topo.v2h[v2] = INVALID_ID
-    topo.f2h[[f1,f2]] .= INVALID_ID
-    return v1,_edge(h11),_edge(h21)
 end

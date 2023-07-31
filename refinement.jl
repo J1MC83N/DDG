@@ -1,8 +1,194 @@
+################################ Topology modification ##################################
+macro assign_vars_diamond(topo,eid)
+    quote
+        # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
+        h1::HID,h2::HID = _bothhalfedge($eid)
+        h11::HID,h21::HID = @fix1 $topo (next(h1), next(h2))
+        h12::HID,h22::HID = @fix1 $topo (next(h11), next(h21))
+        f1::FID,f2::FID = @fix1 $topo (face(h1), face(h2))
+        v1::VID,v2::VID = @fix1 $topo (vertex(h1), vertex(h2))
+        u1::VID,u2::VID = @fix1 $topo (vertex(h12), vertex(h22))
+    end |> esc
+end
+
+@propagate_inbounds function form_triangle!(topo::IHTopology,f::FID,v1::VID,v2::VID,v3::VID,h1::HID,h2::HID,h3::HID)
+    @unpack h2next,h2v,h2f,v2h,f2h = topo
+    h2next[h1] = h2
+    h2next[h2] = h3
+    h2next[h3] = h1
+    h2v[h1] = v1
+    h2v[h2] = v2
+    h2v[h3] = v3
+    h2f[h1] = h2f[h2] = h2f[h3] = f
+    v2h[v1] = h1
+    v2h[v2] = h2
+    v2h[v3] = h3
+    f2h[f] = h1
+end
+
+function flipedge!(topo::IHTopology{3}, e::EID; record::Maybe{IHHandleRecord}=nothing)
+    @assert e in edgeids(topo)
+    @assert !isboundary(topo, e)
+    
+    # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
+    @assign_vars_diamond topo e
+    
+    form_triangle!(topo,f1,u1,u2,v2,h1,h22,h11)
+    form_triangle!(topo,f2,u2,u1,v1,h2,h12,h21)
+    
+    if !isnothing(record)
+        compose_multimap!(record.fidmap, f1=>(f1,f2), f2=>(f1,f2); assume_identity=true)
+        compose_multimap!(record.hidmap, h1=>(h1,h2), h2=>(h1,h2); assume_identity=true)
+    end
+    
+    return topo
+end
+# flipedge!(topo::IHTopology{3}, h::HID) = flipedge!(topo,_edge(h))
+
+
+"""
+    makeroom!(v::Vector, delta::Integer, indextype)
+
+Grow end of `v` by `delta` and return new indices as a range of type `indextype`
+"""
+function makeroom!(v::Vector, delta::Integer, indextype::Type{IT}) where IT<:Integer
+    lv = length(v)
+    Base._growend!(v, delta)
+    return IT(lv+1):IT(lv+delta)
+end
+
+function splitedge!(topo::IHTopology{3}, e::EID; record::Maybe{IHHandleRecord}=nothing)
+    @assert e in edgeids(topo)
+    @assert !isboundary(topo, e)
+    
+    # face f1 is h1->h11->h12 (v1->v2->u1), face f2 = h2->h21->h22 (v2->v1->u2)
+    @assign_vars_diamond topo e
+    
+    # making room in topo interal storage, assigning handles for new objects
+    @unpack h2next,h2v,h2f,v2h,f2h = topo
+    h1_,h2_,w1,w1_,w2,w2_ = makeroom!(h2next, 6, HID)
+    Base._growend!(h2v, 6)
+    Base._growend!(h2f, 6)
+    v, = makeroom!(v2h, 1, VID)
+    f1_,f2_ = makeroom!(f2h, 2, FID)
+    
+    form_triangle!(topo,f1,v1,v,u1,h1,w1,h12)
+    form_triangle!(topo,f2,v2,v,u2,h2_,w2,h22)
+    form_triangle!(topo,f1_,v,v2,u1,h1_,h11,w1_)
+    form_triangle!(topo,f2_,v,v1,u2,h2,h21,w2_)
+    
+    if !isnothing(record)
+        compose_multimap!(record.hidmap, h1=>(h1,h1_), h2=>(h2,h2_), INVALID_HID=>(w1,w1_,w2,w2_); assume_identity=true)
+        compose_multimap!(record.vidmap, INVALID_VID=>(v,); assume_identity=true)
+        compose_multimap!(record.fidmap, f1=>(f1,f1_), f2=>(f2,f2_); assume_identity=true)
+    end
+    
+    return v
+end
+# splitedge!(topo::IHTopology{3}, h::HID) = splitedge!(topo, _edge(h))
+
+
+# """ Check of halfedge is part of a "pinch" triangle, i.e. either of two triangles that share two edges. Adapted from Geometry Central's `collapseEdgeTriangular`.
+# """
+# function ispinch(topo::IHTopology{3}, h0::HID)
+#     for h1 in VHIterator(topo,headvertex(topo,h0)), h2 in VHIterator(topo,headvertex(topo,h1))
+#         # going around a face interior
+#         @fix1topo next(h0)==h1 && next(h1) == h2 && continue
+#         # going around a face exterior (twins of interior next loop)
+#         @fix1topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
+#         @fix1topo headvertex(h2) == vertex(h0) && return true
+#     end
+#     return false
+# end
+# function ispinch(topo::IHTopology{3}, e::EID)
+#     h1,h2 = _bothhalfedge(e)
+#     ispinch(topo, h1) || ispinch(topo, h2)
+# end
+# ispinch(topo::IHTopology{3}, f::FID) = ispinch(topo, halfedge(topo, f))
+# @fix1able ispinch
+
+function are_bothface_overlapping(topo::IHTopology{3}, e::EID)
+    h11,h21 = _bothhalfedge(e)
+    h12,h22 = @fix1topo next(h11),next(h21)
+    v13,v23 = @fix1topo headvertex(h12),headvertex(h22)
+    return @fix1topo vertex(h11)==vertex(h22) && vertex(h12)==vertex(h21) && v13==v23
+end
+
+@propagate_inbounds function reassign_vid_to!(topo::IHTopology, vid::VID, vid_::VID)
+    # everything that had vid now has vid_
+    hs = collect(VHIterator(topo, vid))
+    for (h,h_) in zip(VHIterator(topo, vid),hs)
+        @assert h==h_
+        topo.h2v[h] = vid_
+    end
+    
+    # every property vid_ had replaced with everything vid has
+    topo.v2h[vid_] = vid
+    
+    topo
+end
+@propagate_inbounds function reassign_interior_hid_to!(topo::IHTopology{3}, hid::HID, hid_::HID)
+    # everything that had hid now has hid_
+    topo.h2next[prev_interior_loop(topo, hid)] = hid_
+    topo.v2h[vertex(topo, hid)] = hid_
+    topo.f2h[face(topo, hid)] = hid_
+    
+    # every property hid_ had replaced with everything hid has
+    topo.h2next[hid_] = topo.h2next[hid]
+    topo.h2v[hid_] = topo.h2v[hid]
+    topo.h2f[hid_] = topo.h2f[hid]
+    
+    return topo
+end
+
+function collapseedge!(topo::IHTopology{3}, e::EID, hids_delete, vids_delete, fids_delete; record::Maybe{IHHandleRecord}=nothing)
+    @assert !isboundary(topo, e)
+    h1,h2 = _bothhalfedge(e)
+    # @assert @fix1topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
+    
+    @assign_vars_diamond topo e
+    h11_,h12_,h21_,h22_ = _twin(h11), _twin(h12), _twin(h21), _twin(h22)
+    
+    topo.v2h[v1] = h12_ # know to have base vertex v1
+    reassign_vid_to!(topo, v2, v1)
+    
+    topo.v2h[u1] = _twin(h11)
+    topo.v2h[u2] = _twin(h21)
+    reassign_interior_hid_to!(topo, h12_, h11)
+    reassign_interior_hid_to!(topo, h22_, h21)
+    
+    push!(hids_delete, h1, h2, h12, h22, h12_, h22_)
+    push!(vids_delete, v2)
+    push!(fids_delete, f1, f2)
+    
+    topo.h2next[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
+    topo.h2v[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
+    topo.h2f[[h1, h2, h12, h22, h12_, h22_]] .= INVALID_ID
+    topo.v2h[v2] = INVALID_ID
+    topo.f2h[[f1,f2]] .= INVALID_ID
+    
+    if !isnothing(record)
+        compose_multimap!(record.hidmap, 
+            (h1,h2)=>(INVALID_HID,), 
+            (h12_,h11)=>(h11,),
+            (h12,h11_)=>(h11_,),
+            (h22_,h21)=>(h21,),
+            (h22,h21_)=>(h21_,);
+            assume_identity=true)
+        compose_multimap!(record.vidmap, (v1,v2)=>(v1,); assume_identity=true)
+        compose_multimap!(record.fidmap, (f1,f2)=>(INVALID_FID,); assume_identity=true)
+    end
+    
+    return v1
+end
+
+
+
 using Random: shuffle
 
 ################################ edge-flip based ##################################
-flipedge!(mesh::Mesh, e::EID) = flipedge!(topology(mesh),e)
-flipedge!(mesh::Mesh, h::HID) = flipedge!(topology(mesh),h)
+flipedge!(mesh::Mesh, e::EID; record::Maybe{IHHandleRecord}=nothing) = flipedge!(topology(mesh), e; record)
+# flipedge!(mesh::Mesh, h::HID) = flipedge!(topology(mesh),h)
 
 function flip_produces_crease(mesh::IHTriMesh,e::EID)::Bool
     @assign_vars_diamond mesh e
@@ -11,7 +197,7 @@ function flip_produces_crease(mesh::IHTriMesh,e::EID)::Bool
 end
 
 
-# function improve_by_flips!(flip_if_improves!::Base.Callable,mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Union{AbstractSet{EID},Nothing}=nothing)
+# function improve_by_flips!(flip_if_improves!::Base.Callable,mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Maybe{AbstractSet{EID}}=nothing)
 #     useblacklist = !isnothing(blacklist)
 #     @assert 0 < p <= 1
 #     pastflips = CircularBuffer{Bool}(ceil(Int, 2inv(p)))
@@ -40,7 +226,7 @@ end
 #     _degree_deviation(dv1,dv2,du1,du2)
 # end
 
-# improve_vertex_degree!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Union{AbstractSet{EID},Nothing}=nothing) = improve_by_flips!(flip_if_improves_vertex_degree!,mesh,p;max_checks,blacklist)
+# improve_vertex_degree!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Maybe{AbstractSet{EID}}=nothing) = improve_by_flips!(flip_if_improves_vertex_degree!,mesh,p;max_checks,blacklist)
 # # _should_flip(dv1::Int,dv2::Int,du1::Int,du2::Int) = _degree_deviation(dv1-1,dv2-1,du1+1,du2+1) > _degree_deviation(dv1,dv2,du1,du2)
 
 # function flip_if_improves_vertex_degree!(mesh::IHTriMesh,e::EID)::Bool
@@ -70,10 +256,11 @@ is_diamond_delaunay(mesh::IHTriMesh,h::HID) = is_diamond_delaunay(mesh,_edge(h))
 #     return improves
 # end
 
-# improve_delaunay!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Union{AbstractSet{EID},Nothing}=nothing) = improve_by_flips!(flip_if_improves_delaunay!,mesh,p;max_checks,blacklist)
+# improve_delaunay!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Maybe{AbstractSet{EID}}=nothing) = improve_by_flips!(flip_if_improves_delaunay!,mesh,p;max_checks,blacklist)
 
 function improve_delaunay2!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
-    # iter_e2p = (e=>delaunayvalue(mesh,e) for e in edgeids(mesh) if !isboundary(mesh,e))
+    record = IHHandleRecord(mesh)
+    
     E2Priority = PriorityQueue{EID,T}(Base.ReverseOrdering())
     for e in edgeids(mesh)
         !isboundary(mesh, e) && (E2Priority[e] = delaunayvalue(mesh, e))
@@ -83,8 +270,7 @@ function improve_delaunay2!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
         e,delval = dequeue_pair!(E2Priority)
         delval <= π+√eps(T) && break # maximum edge value is below threshold
         flip_produces_crease(mesh, e) && continue
-        # @infiltrate e==17571
-        flipedge!(mesh, e); nflips += 1
+        flipedge!(mesh, e; record); nflips += 1
         
         # update priority affected edges
         @assign_vars_diamond mesh e
@@ -100,7 +286,7 @@ function improve_delaunay2!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
         end
     end
     @show nflips, nedges(mesh)
-    return mesh
+    return record
 end
 
 
@@ -108,33 +294,31 @@ end
 
 midpoint(p1::Point{Dim},p2::Point{Dim}) where Dim = Point((coordinates(p1)+coordinates(p2))/2)
 @propagate_inbounds midpoint(mesh::IHMesh,v1::VID,v2::VID) = midpoint(vertices(mesh)[v1], vertices(mesh)[v2])
-function splitedge!(mesh::IHTriMesh, e::EID)
+function splitedge!(mesh::IHTriMesh, e::EID; record::Maybe{IHHandleRecord}=nothing)
     v1,v2 = bothvertex(mesh,e)
-    v,e1,e2 = splitedge!(topology(mesh), e)
+    v = splitedge!(topology(mesh), e; record)
     push!(vertices(mesh),midpoint(mesh,v1,v2))
-    return v,e1,e2
+    return v
 end
 
 function split_long_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4/3; shuffle_order::Bool=true) where {Dim,T}
+    record = IHHandleRecord(mesh)
+    
     sum_length = zero(T)
     for e in edgeids(mesh)
-        sum_length += edgelength(mesh,e)
+        sum_length += edgelength(mesh, e)
     end
     threshold = sum_length/nedges(mesh) * T(mean_length_ratio)
-    # nsplit = 0
     edges_tosplit = EID[]
-    edges_split = EID[]
     edges = shuffle_order ? shuffle(edgeids(mesh)) : edgeids(mesh)
     for e in edges
-        if edgelength(mesh,e) > threshold
-            # nsplit += 1
-            push!(edges_tosplit,e)
-            v,e1,e2 = splitedge!(mesh,e)
-            push!(edges_split,e1,e2)
+        if edgelength(mesh, e) > threshold
+            push!(edges_tosplit, e)
+            splitedge!(mesh, e; record)
         end
     end
     @show length(edges_tosplit),nedges(mesh)
-    return edges_tosplit,edges_split
+    return record
 end
 
 
@@ -176,35 +360,37 @@ function _construct_decum_identity(ids_delete::UnsignedSet{T}, n::Integer) where
     end
     return out
 end
-function _apply_vectormap!(A::Array{T}, map::Vector{T}) where T<:Unsigned
+function _apply_map!(A::Array{T}, map::AbstractDict{T,T}) where T<:Unsigned
     for i in eachindex(A)
          A[i] = map[A[i]]
     end
     A
 end
-function _apply_vectormap!(A::Array{Union{Nothing,T}}, map::Vector{T}) where T<:Unsigned
+function _apply_map!(A::Array{Maybe{T}}, map::AbstractDict{T,T}) where T<:Unsigned
     for i in eachindex(A)
         !isnothing(A[i]) && (A[i] = map[A[i]::T])
     end
     A
 end
 function _construct_maps(topo::IHTopology,hids_delete::UnsignedSet{HID},vids_delete::UnsignedSet{VID},fids_delete::UnsignedSet{FID})
-    hidmap = _construct_decum_identity(hids_delete, nhalfedges(topo))
-    vidmap = _construct_decum_identity(vids_delete, nvertices(topo))
-    fidmap = _construct_decum_identity(fids_delete, nfaces(topo))
-    return hidmap,vidmap,fidmap
+    hidmap = UnsignedDict{HID}(_construct_decum_identity(hids_delete, nhalfedges(topo)))
+    vidmap = UnsignedDict{VID}(_construct_decum_identity(vids_delete, nvertices(topo)))
+    fidmap = UnsignedDict{FID}(_construct_decum_identity(fids_delete, nfaces(topo)))
+    return IHHandleMap(hidmap,vidmap,fidmap)
 end
 function _delete_ids!(topo::IHTopology,hids_delete::UnsignedSet{HID},vids_delete::UnsignedSet{VID},fids_delete::UnsignedSet{FID})
-    hidmap,vidmap,fidmap = _construct_maps(topo,hids_delete,vids_delete,fids_delete)
-    deleteat!(topo.h2next, hids_delete); _apply_vectormap!(topo.h2next, hidmap); 
-    deleteat!(topo.h2v, hids_delete)   ; _apply_vectormap!(topo.h2v, vidmap);    
-    deleteat!(topo.h2f, hids_delete)   ; _apply_vectormap!(topo.h2f, fidmap);    
-    deleteat!(topo.v2h, vids_delete)   ; _apply_vectormap!(topo.v2h, hidmap);    
-    deleteat!(topo.f2h, fids_delete)   ; _apply_vectormap!(topo.f2h, hidmap);    
-    return hidmap,vidmap,fidmap
+    ihmap = _construct_maps(topo,hids_delete,vids_delete,fids_delete)
+    deleteat!(topo.h2next, hids_delete); _apply_map!(topo.h2next, ihmap.hidmap); 
+    deleteat!(topo.h2v, hids_delete)   ; _apply_map!(topo.h2v, ihmap.vidmap);    
+    deleteat!(topo.h2f, hids_delete)   ; _apply_map!(topo.h2f, ihmap.fidmap);    
+    deleteat!(topo.v2h, vids_delete)   ; _apply_map!(topo.v2h, ihmap.hidmap);    
+    deleteat!(topo.f2h, fids_delete)   ; _apply_map!(topo.f2h, ihmap.hidmap);    
+    return ihmap
 end
 
 function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4/5) where {Dim,T}
+    record = IHHandleRecord(mesh)
+    
     positions = vertices(mesh)
     planecache = [plane_equation(face) for face in elements(mesh)]
     
@@ -213,14 +399,11 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
         sum_length += edgelength(mesh,e)
     end
     threshold = sum_length/nedges(mesh) * T(mean_length_ratio)
-    ncollapse = 0
     hids_delete = UnsignedSet{HID}(nhalfedges(mesh)+1)
     vids_delete =UnsignedSet{VID}(nvertices(mesh)+1)
     fids_delete = UnsignedSet{FID}(nfaces(mesh)+1)
     vids_covered = UnsignedSet{VID}(nfaces(mesh)+1)
     
-    edges_tocollapse = EID[]
-    edges_seam = EID[]
     @forlorn for e in edgeids(mesh)
         isboundary(mesh,e) && continue
         hasintersection(hids_delete,_bothhalfedge(e)) && continue
@@ -234,28 +417,21 @@ function collapse_short_edges!(mesh::IHTriMesh{Dim,T}, mean_length_ratio::Real=4
         # hasintersection(hids_delete, (h1,h11,h12,h2,h21,h22,h11_,h21_,h12_,h22_)) && continue
         if edgelength(mesh,e) < threshold
             newpos = merged_position(mesh,bothvertex(mesh,e)...,planecache)
-            v,es1,es2 = collapseedge!(topology(mesh),e,hids_delete,vids_delete,fids_delete)
+            v = collapseedge!(topology(mesh), e, hids_delete, vids_delete, fids_delete; record)
             positions[v] = newpos
-            # @infiltrate e == 61014
             for fid in VFIterator(mesh,v)
                 planecache[fid] = plane_equation(mesh[fid])
             end
             push!(vids_covered,v1,v2,u1,u2)
-            push!(edges_tocollapse,e)
-            push!(edges_seam,es1,es2)
-            ncollapse += 1
         end
     end
-    # @show edges
-    @show ncollapse,nedges(mesh)
-    hidmap,_,_ = _delete_ids!(topology(mesh),hids_delete,vids_delete,fids_delete)
-    # @infiltrate
-    for i in eachindex(edges_seam)
-        edges_seam[i] = _edge(hidmap[_halfedge(edges_seam[i])])
-    end
+    ncollapsed = nrelationswith(record.hidmap.backward,INVALID_HID)÷2
+    @show ncollapsed,nedges(mesh)
+    ihmap = _delete_ids!(topology(mesh),hids_delete,vids_delete,fids_delete)
+    compose_map!(record, ihmap; assume_identity=false)
     
     deleteat!(positions,vids_delete)
-    return edges_tocollapse,edges_seam
+    return record
 end
 
 
@@ -300,10 +476,3 @@ function routine!(mesh::IHTriMesh{3})
     return mesh
 end
 
-function color_edges(mesh::IHTriMesh,default,edges,color)
-    facetcolor = fill(default,nedges(mesh)*3)
-    for e in edges, i in 0:2
-        facetcolor[3*e-i] = color
-    end
-    return facetcolor
-end

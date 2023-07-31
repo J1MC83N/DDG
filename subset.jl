@@ -184,24 +184,28 @@
 
 
 """
-    struct IHHandleMap
-        hidmap::Dict{HID, HID}
-        vidmap::Dict{VID, VID}
-        fidmap::Dict{FID, FID}
+    struct IHHandleMap{HM<:AbstractDict{HID,HID}, VM<:AbstractDict{VID,VID}, FM<:AbstractDict{FID,FID}}
+        hidmap::HM
+        vidmap::VM
+        fidmap::FM
     end
 
-A struct of three Dicts mapping each id to a new id. 
+A struct of three dictionaries mapping each id to a new id. 
 """
-struct IHHandleMap
-    hidmap::Dict{HID, HID}
-    vidmap::Dict{VID, VID}
-    fidmap::Dict{FID, FID}
+struct IHHandleMap{HM<:AbstractDict{HID,HID}, VM<:AbstractDict{VID,VID}, FM<:AbstractDict{FID,FID}}
+    hidmap::HM
+    vidmap::VM
+    fidmap::FM
+end
+function IHHandleMap(hidmap::HM, vidmap::VM, fidmap::FM) where {HM<:AbstractDict{HID,HID}, VM<:AbstractDict{VID,VID}, FM<:AbstractDict{FID,FID}}
+    IHHandleMap{HM,VM,FM}(hidmap, vidmap, fidmap)
 end
 
-import Base: getindex, haskey
+import Base: getindex, haskey, get
 getindex(M::IHHandleMap, hid::HID) = M.hidmap[hid]
 getindex(M::IHHandleMap, vid::VID) = M.vidmap[vid]
 getindex(M::IHHandleMap, fid::FID) = M.fidmap[fid]
+get(M::IHHandleMap, key, default) = haskey(M, key) ? M[key] : default
 haskey(M::IHHandleMap, hid::HID) = haskey(M.hidmap, hid)
 haskey(M::IHHandleMap, vid::VID) = haskey(M.vidmap, vid)
 haskey(M::IHHandleMap, fid::FID) = haskey(M.fidmap, fid)
@@ -283,23 +287,40 @@ end
 
 
 """
-    struct IHHandleRelation
-        hidrel::IntKeyedRelationKV{HID, HID}
-        vidrel::IntKeyedRelationKV{VID, VID}
-        fidrel::IntKeyedRelationKV{FID, FID}
+    struct IHHandleRecord
+        hidmap::IntKeyedMultiMapKV{HID, HID}
+        vidmap::IntKeyedMultiMapKV{VID, VID}
+        fidmap::IntKeyedMultiMapKV{FID, FID}
     end
 
-A struct of three id relations, respectively for halfedge, vertex and face ids. Serves as a record for arbitrary topology transformations. 
+A struct of three id MultiMaps, respectively for halfedge, vertex and face ids. Serves as a record for arbitrary topology transformations. 
 """
-struct IHHandleRelation
-    hidrel::IntKeyedRelationKV{HID, HID}
-    vidrel::IntKeyedRelationKV{VID, VID}
-    fidrel::IntKeyedRelationKV{FID, FID}
+struct IHHandleRecord
+    hidmap::IntKeyedBiMultiMapLR{HID, HID}
+    vidmap::IntKeyedBiMultiMapLR{VID, VID}
+    fidmap::IntKeyedBiMultiMapLR{FID, FID}
 end
-function IHHandleRelation(isizes::NTuple{3,Integer}, Ms::NTuple{3,Int}=(1,1,1))
-    hidrel = IntKeyedRelation{Ms[1],HID,HID}(isizes[1])
-    vidrel = IntKeyedRelation{Ms[2],VID,VID}(isizes[2])
-    fidrel = IntKeyedRelation{Ms[3],FID,FID}(isizes[3])
-    return IHHandleRelation(hidrel, vidrel, fidrel)
+function IHHandleRecord(isizes::NTuple{3,Integer}=(64,64,64), Ms::NTuple{3,Int}=(1,1,1))
+    hidmap = IntKeyedBiMultiMap{Ms[1],Ms[1],HID,HID}(isizes[1],isizes[1])
+    vidmap = IntKeyedBiMultiMap{Ms[2],Ms[2],VID,VID}(isizes[2],isizes[2])
+    fidmap = IntKeyedBiMultiMap{Ms[3],Ms[3],FID,FID}(isizes[3],isizes[3])
+    return IHHandleRecord(hidmap, vidmap, fidmap)
 end
-IHHandleRelation(topo::IHTopology, Ms::NTuple{3,Int}=(1,1,1)) = IHHandleRelation(nhvf(topo),Ms)
+IHHandleRecord(topo::IHTopology, Ms::NTuple{3,Int}=(1,1,1)) = IHHandleRecord(nhvf(topo),Ms)
+IHHandleRecord(mesh::IHMesh, Ms::NTuple{3,Int}=(1,1,1)) = IHHandleRecord(nhvf(mesh),Ms)
+
+function Base.show(io::IO, ::MIME"text/plain", R::IHHandleRecord)
+    println(io, "IHHandleRecord: ")
+    for fieldname in fieldnames(IHHandleRecord)
+        print(io, " -$fieldname: ")
+        show(io, MIME"text/plain"(), getfield(R, fieldname))
+        println(io)
+    end
+end
+
+function compose_map!(record::IHHandleRecord, map::IHHandleMap; assume_identity::Bool=false)
+    compose_map!(record.hidmap, map.hidmap; assume_identity)
+    compose_map!(record.vidmap, map.vidmap; assume_identity)
+    compose_map!(record.fidmap, map.fidmap; assume_identity)
+    return record
+end

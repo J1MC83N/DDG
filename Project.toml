@@ -1,6 +1,7 @@
 [deps]
 Bijections = "e2ed5e7c-b2de-5872-ae92-c73ca462fb04"
 CBinding = "d43a6710-96b8-4a2d-833c-c424785e5374"
+CategoricalArrays = "324d7699-5711-5eae-9e2f-1d82baa6b597"
 CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 FastOBJ = "9292563e-d3fd-4146-8625-f91e6ba20d2d"

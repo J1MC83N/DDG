@@ -17,6 +17,13 @@ end
 UnsignedSet{T}(itr) where T = UnsignedSet{T}(IntSet(itr))
 UnsignedSet{T}() where T = UnsignedSet{T}(IntSet())
 
+
+
+function invert!(s::UnsignedSet)
+    s.data.inverse = true
+    s
+end
+
 import Base: first, last, iterate, length, in, sizehint!, empty!, delete!, push!, issorted
 first(s::UnsignedSet{T}) where T = T(first(s.data))
 last(s::UnsignedSet{T}) where T = T(last(s.data))
@@ -49,19 +56,31 @@ function hasintersection(s::UnsignedSet{T}, itr) where T
     return false
 end
 
+
 """
     UnsignedDict{K<:Unsigned,V} <: AbstractDict{K,V}
 
 Specialized array-backed dictonary for storing key=>value pairs with densely-distributed, small Unsigned keys. 
 """
 struct UnsignedDict{K<:Unsigned,V} <: AbstractDict{K,V}
-    keys::UnsignedSet
+    keys::UnsignedSet{K}
     values::Vector{V}
-    function UnsignedDict{K,V}(;sizehint::Int=64) where {K<:Unsigned,V}
-        keys = sizehint!(UnsignedSet{K}(),sizehint)
-        values = Vector{V}(undef,sizehint)
-        new{K,V}(keys,values)
-    end
+end
+
+function UnsignedDict{K}(v::Vector{V}) where {K,V}
+    l = length(v)
+    Base._growat!(v,1,1)
+    _keys = IntSet()
+    _keys.bits = trues(l+1)
+    _keys.bits[1] = 0
+    UnsignedDict{K,V}(UnsignedSet{K}(_keys),v)
+end
+
+
+function UnsignedDict{K,V}(;sizehint::Int=64) where {K<:Unsigned,V}
+    keys = sizehint!(UnsignedSet{K}(),sizehint)
+    values = Vector{V}(undef,sizehint)
+    UnsignedDict{K,V}(keys,values)
 end
 
 import Base: getindex, haskey, keys, get, setindex!, length, iterate, isempty
@@ -80,7 +99,7 @@ function setindex!(d::UnsignedDict{K,V}, v::V, key::Integer) where {K,V}
     return d
 end
 setindex!(d::UnsignedDict{K,V}, v0, key::Integer) where {K,V} = setindex!(d,convert(V,v0),key)
-get(d::UnsignedDict{K,V}, key::Integer, default) where {K,V} = haskey(d,key) ? d[key]::V : default
+get(d::UnsignedDict{K,V}, key::Integer, default) where {K,V} = haskey(d,key) ? d.values[key+1]::V : default
 isempty(d::UnsignedDict) = isempty(keys(d))
 function iterate(d::UnsignedDict)
     isempty(d) && return nothing

@@ -47,7 +47,7 @@ Works by solving APₕ = MP₀ via backward Euler, where:
 - L is the Laplacian matrix (see [`laplacematrix`](@ref)),
 - A is the main operator matrix, A = M(I-hΔ) = M-hL, L=MΔ
 """
-function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=-eps(T)), solver::Union{Nothing,LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
+function mean_curvature_flow!(mesh::IHTriMesh{Dim,T}, h::Real; L::AbstractMatrix{T}=laplacematrix(mesh, shift=-eps(T)), solver::Maybe{LinearSolve.SciMLLinearSolveAlgorithm}=KrylovJL_CG()) where {Dim,T}
     @assert Dim > 2
     h = convert(T, h)
     vertices = vertices(mesh)

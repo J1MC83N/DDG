@@ -68,7 +68,7 @@ end
 
 Construct an implicit halfedge mesh from a .obj file. Setting `check_orientability` to `false` disables all checks on mesh orientability, but does not promise producing a valid halfedge mesh. Setting `show_progress` to a Bool toggles a progress meter, and setting it to `nothing` let it be decided automatically.
 """
-function IHMesh(filename::AbstractString; check_orientability::Bool=true, show_progress::Union{Nothing,Bool}=nothing)
+function IHMesh(filename::AbstractString; check_orientability::Bool=true, show_progress::Maybe{Bool}=nothing)
     something(show_progress,false) && println("Reading obj file...")
     @timeit to "obj read" vertices,faces,N = obj_read(filename)
     show_progress = isnothing(show_progress) ? length(faces)>10^6 : show_progress

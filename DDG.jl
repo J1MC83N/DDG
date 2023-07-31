@@ -8,18 +8,28 @@ include("utils/Handles.jl")
 @HandleType_alias EdgeHandle EID
 @HandleType_alias CornerHandle CID
 const INVALID_ID = 0
+for (handle,alias) in _Handle2Alias
+    @eval const $(Symbol(:INVALID_,alias)) = $handle(0)
+end
+
+const Maybe{T} = Union{T, Nothing}
 
 include("utils/setwo-dictwo.jl")
 include("utils/vector-set-dict.jl")
 include("utils/matrix-set-dict.jl")
+include("utils/multimaps.jl")
 include("utils/cycpairvector.jl")
 
 include("halfedges.jl")
 include("validations.jl")
 include("geometry.jl")
 include("mean_curvature_flow.jl")
-include("refinement.jl")
 include("subset.jl")
+include("refinement.jl")
+
+using GLMakie
+using MeshViz
+GLMakie.Makie.inline!(false)
 include("meshviz_mod.jl")
 
 
@@ -38,8 +48,67 @@ arrowhead = IHMesh("test-obj/arrowhead.obj")
 
 
 
+winsize(nx,ny) = (3072÷nx,(1920-46)÷ny-46)
 
+using GLMakie.Makie.Observables: ObservablePair
+function syncfields(s1::T,s2::T) where T
+    for (name,type) in zip(fieldnames(T),fieldtypes(T))
+        if type <: Observable
+            ObservablePair(getfield(s1,name),getfield(s2,name))
+        end
+    end
+end
+function synclscenes(lscene1::LScene,lscene2::LScene)
+    syncfields(lscene1.scene.camera_controls,lscene2.scene.camera_controls)
+    syncfields(lscene1.scene.camera,lscene2.scene.camera)
+    syncfields(lscene1.scene.lights[1], lscene2.scene.lights[1])
+    lscene1
+end
+synclscenes(lscenes::LScene...) = reduce(synclscenes, lscenes)
 
+function vizgrid!(fig::Figure, gridpos, mesh, title, edges_colors...; kwargs...)
+    gl = fig[gridpos...] = GridLayout()
+    gl[1, 1] = Label(fig, title, tellwidth=false)
+    lscene = LScene(gl[2, 1])
+    viz!(lscene, mesh; showfacets=true, color=:lightblue, facetcolor=color_edges(mesh,:black,edges_colors...), kwargs...)
+    lscene
+end
+
+Theme(
+    fontsize = 24,
+) |> set_theme!
+
+mesh = IHMesh("test-obj/gourd.obj")
+center_vertices!(mesh)
+mesh_original = deepcopy(mesh)
+
+rec_flip = improve_delaunay2!(mesh)
+mesh_flip = deepcopy(mesh)
+
+rec_split = split_long_edges!(mesh)
+mesh_split = deepcopy(mesh)
+
+center_vertices!(mesh)
+mesh_precollapse = deepcopy(mesh)
+rec_collapse = collapse_short_edges!(mesh)
+mesh_collapse = deepcopy(mesh)
+
+fig = Figure(); resize!(fig,winsize(1,1)...)
+lscene_original = vizgrid!(fig, (1,1), mesh_original, "original")
+lscene_flip = vizgrid!(fig, (2,1), mesh_flip, "post-flip", 
+    (values(rec_flip.hidmap),:red))
+lscene_presplit = vizgrid!(fig, (1,2), mesh_flip, "pre-split", 
+    (Iterators.filter(!iszero,keys(rec_split.hidmap)),:red))
+lscene_postsplit = vizgrid!(fig, (2,2), mesh_split, "post-split", 
+    (values(rec_split.hidmap),:red),
+    (relationswith(rec_split.hidmap,HID(0)),:yellow))
+lscene_precollapse = vizgrid!(fig, (1,3), mesh_precollapse, "pre-collapse", 
+    (relationswith(rec_collapse.hidmap.backward,INVALID_HID),:red))
+lscene_collapse = vizgrid!(fig, (2,3), mesh_collapse, "post-collapse", 
+    (Iterators.filter(!iszero,values(rec_collapse.hidmap)),:red))
+# synclscenes(lscene_original, lscene_flip, lscene_presplit, lscene_postsplit)
+synclscenes(map(gc->gc.content.content[2].content,fig.layout.content)...)
+fig
 
 # using Profile, PProf, BenchmarkTools
 # mesh = IHMesh("test-obj/coin.obj")
@@ -57,7 +126,6 @@ arrowhead = IHMesh("test-obj/arrowhead.obj")
 # # for e in edges, i in 0:2; facetcolor[e*3-i] = :red end
 # display(GLMakie.Screen(),viz(mesh,showfacets=true;color))
 
-winsize(nx,ny) = (3072÷nx,(1920-46)÷ny-46)
 
 mesh = IHMesh("test-obj/coin.obj")
 mesh_original = deepcopy(mesh)
@@ -121,16 +189,16 @@ resize!(display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue;facet
 
 
 
-function vizsub(submesh::IHSubMesh, zoom; kwargs...)
-    GLMakie.Makie.inline!(false)
-    verts = getindex(vertices(submesh),submesh.vids|>collect)
-    plt = viz(submesh; kwargs...)
-    cam = cameracontrols(plt.axis.scene)
-    com = GLMakie.Vec3f(mean(coordinates,verts))
-    update_cam!(plt.axis.scene, cam, cam.eyeposition[], com)
-    zoom!(plt.axis.scene, zoom)
-    plt
-end
-submesh = subset(gourd,flood_traversal(gourd,FFIterator,FID(300),2))
-vizsub(submesh,showfacets=true)
+# function vizsub(submesh::IHSubMesh, zoom; kwargs...)
+#     GLMakie.Makie.inline!(false)
+#     verts = getindex(vertices(submesh),submesh.vids|>collect)
+#     plt = viz(submesh; kwargs...)
+#     cam = cameracontrols(plt.axis.scene)
+#     com = GLMakie.Vec3f(mean(coordinates,verts))
+#     update_cam!(plt.axis.scene, cam, cam.eyeposition[], com)
+#     zoom!(plt.axis.scene, zoom)
+#     plt
+# end
+# submesh = subset(gourd,flood_traversal(gourd,FFIterator,FID(300),2))
+# vizsub(submesh,showfacets=true)
 # cameracontrols!(plt.axis,cam)
