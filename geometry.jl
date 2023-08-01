@@ -21,15 +21,11 @@ for (f, H) in union(_IH_PRIMARY_METHODS, _IH_SECONDARY_METHODS)
     @eval @fix1able @propagate_inbounds $f(mesh::IHMesh, id::$H) = $f(topology(mesh),id)
 end
 
-macro fix1mesh(ex)
-    _fix1(:mesh,ex)
-end
-
 @fix1able @propagate_inbounds topoint(mesh::IHMesh, v::VID) = vertices(mesh)[v]
-@fix1able @propagate_inbounds tovec(mesh::IHMesh, h::HID) = @fix1mesh topoint(headvertex(h)) - topoint(vertex(h))
+@fix1able @propagate_inbounds tovec(mesh::IHMesh, h::HID) = @fix1 mesh topoint(headvertex(h)) - topoint(vertex(h))
 @fix1able @propagate_inbounds function tovec(mesh::IHMesh, e::EID)
     h1,h2 = _bothhalfedge(e)
-    return @fix1mesh topoint(vertex(h1)) - topoint(vertex(h2))
+    return @fix1 mesh topoint(vertex(h1)) - topoint(vertex(h2))
 end
 @fix1able @propagate_inbounds edgelength(mesh::IHMesh, e::EID) = norm(tovec(mesh,e))
 
@@ -120,10 +116,10 @@ function normalize!(mesh::IHMesh{Dim,T}; rescale::Bool=true) where {Dim,T}
 end
 
 import Meshes: ∠
-@fix1able ∠(mesh::IHMesh, c::CID) = @fix1mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
+@fix1able ∠(mesh::IHMesh, c::CID) = @fix1 mesh ∠(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
 
 _cotan(v1::T, v2::T) where T<:Vec = dot(v1,v2)/norm(cross(v1,v2))
-@fix1able cotan(mesh::IHTriMesh, c::CID) = @fix1mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
+@fix1able cotan(mesh::IHTriMesh, c::CID) = @fix1 mesh _cotan(tovec(twin(halfedge(c))), tovec(next(halfedge(c))))
 # @fix1able unsafe_opp_corner(mesh::IHTriMesh,h::HID) = unsafe_opp_corner(topology(mesh),h)
 # @fix1able opp_corner(mesh::IHTriMesh,h::HID) = opp_corner(topology(mesh),h)
 # @fix1able unsafe_opp_halfedge(mesh::IHTriMesh,c::CID) = unsafe_opp_halfedge(topology(mesh),c)
@@ -166,7 +162,7 @@ barycentric_dual_area(mesh::IHTriMesh{Dim,T}, v::VID) where {Dim,T} = sum(f->are
 function cotan_sum(mesh::IHTriMesh{Dim,T}, h::HID) where {Dim,T}
     s = zero(T)
     for _h in (h, twin(mesh,h))
-        _cotan = isnothing(face(mesh, _h)) ? zero(T) : @fix1mesh cotan(opp_corner(_h))
+        _cotan = isnothing(face(mesh, _h)) ? zero(T) : @fix1 mesh cotan(opp_corner(_h))
         s += _cotan
     end
     return s

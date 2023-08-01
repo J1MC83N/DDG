@@ -93,20 +93,26 @@ mesh_precollapse = deepcopy(mesh)
 rec_collapse = collapse_short_edges!(mesh)
 mesh_collapse = deepcopy(mesh)
 
+center_vertices!(mesh)
+mesh_collapse_center = deepcopy(mesh)
+
+gridposes = [(row,col) for row in 1:2, col in 1:3]|>vec
+
 fig = Figure(); resize!(fig,winsize(1,1)...)
-lscene_original = vizgrid!(fig, (1,1), mesh_original, "original")
-lscene_flip = vizgrid!(fig, (2,1), mesh_flip, "post-flip", 
-    (values(rec_flip.hidmap),:red))
-lscene_presplit = vizgrid!(fig, (1,2), mesh_flip, "pre-split", 
-    (Iterators.filter(!iszero,keys(rec_split.hidmap)),:red))
-lscene_postsplit = vizgrid!(fig, (2,2), mesh_split, "post-split", 
-    (values(rec_split.hidmap),:red),
-    (relationswith(rec_split.hidmap,HID(0)),:yellow))
-lscene_precollapse = vizgrid!(fig, (1,3), mesh_precollapse, "pre-collapse", 
+lscene_original = vizgrid!(fig, popfirst!(gridposes), mesh_original, "original")
+# lscene_flip = vizgrid!(fig, popfirst!(gridposes), mesh_flip, "post-flip", 
+#     (values(rec_flip.hidmap),:red))
+# lscene_presplit = vizgrid!(fig, popfirst!(gridposes), mesh_flip, "pre-split", 
+#     (Iterators.filter(!iszero,keys(rec_split.hidmap)),:red))
+# lscene_postsplit = vizgrid!(fig, popfirst!(gridposes), mesh_split, "post-split", 
+#     (values(rec_split.hidmap),:red),
+#     (relationswith(rec_split.hidmap,HID(0)),:yellow))
+lscene_precollapse = vizgrid!(fig, popfirst!(gridposes), mesh_precollapse, "pre-collapse", 
     (relationswith(rec_collapse.hidmap.backward,INVALID_HID),:red))
-lscene_collapse = vizgrid!(fig, (2,3), mesh_collapse, "post-collapse", 
+lscene_collapse = vizgrid!(fig, popfirst!(gridposes), mesh_collapse, "post-collapse", 
     (Iterators.filter(!iszero,values(rec_collapse.hidmap)),:red))
-# synclscenes(lscene_original, lscene_flip, lscene_presplit, lscene_postsplit)
+lscene_collapse_center = vizgrid!(fig, popfirst!(gridposes), mesh_collapse_center, "post-collapse-center", 
+    (Iterators.filter(!iszero,values(rec_collapse.hidmap)),:red))
 synclscenes(map(gc->gc.content.content[2].content,fig.layout.content)...)
 fig
 

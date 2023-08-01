@@ -187,8 +187,8 @@ end
 
 Convenience macro for fixing the first argument `fixed_arg` for all whitelisted function calls in `expr`. Used only for the convenience methods for getting around an IHTopology; whitelist represented by the global constant `_FIX1_METHODS`, which currently consists of `next`, `twin`, `prev`, `vertex`, `headvertex`, `face`, and `halfedge`.
 
-For instance, `@fix1topo next(h)` is equivalent to `next(topo, h)`. 
-Also supports chaining: `@fix1topo h |> next |> face` is equivalent to `face(topo, next(topo, h))`.
+For instance, `@fix1 topo next(h)` is equivalent to `next(topo, h)`. 
+Also supports chaining: `@fix1 topo h |> next |> face` is equivalent to `face(topo, next(topo, h))`.
 """
 macro fix1(fixed,ex)
     _fix1(fixed,ex)
@@ -215,9 +215,6 @@ function _fix1(fixed,ex::Expr)
     end
 end
 _fix1(fixed,ex) = esc(ex)
-macro fix1topo(ex)
-    _fix1(:topo,ex)
-end
     
 const _FIX1_METHODS = Base.IdSet{Symbol}([:next, :twin, :prev, :vertex, :headvertex, :face, :halfedge, :edge, :bothvertex, :prev_global, :prev_loop, :prev_interior_loop])
 _addtofix1!(fs::Union{Function,Symbol}...) = push!(_FIX1_METHODS,Symbol.(fs)...)
@@ -275,12 +272,12 @@ Base.eltype(::VHIterator) = HID
 
 function Base.iterate(iter::VHIterator)
     @unpack topo,h_start = iter
-    return (h_start, @fix1topo next(twin(h_start)))
+    return (h_start, @fix1 topo next(twin(h_start)))
 end
 function Base.iterate(iter::VHIterator, h::HID)
     @unpack topo,h_start = iter
     h_start == h && return nothing
-    return (h, @fix1topo next(twin(h)))
+    return (h, @fix1 topo next(twin(h)))
 end
 
 
@@ -311,14 +308,14 @@ Base.eltype(::VHIterator_Tracked) = HID
 function Base.iterate(iter::VHIterator_Tracked)
     @unpack topo,h_start = iter
     iter.degree += one(UInt8)
-    return (h_start, @fix1topo next(twin(h_start)))
+    return (h_start, @fix1 topo next(twin(h_start)))
 end
 function Base.iterate(iter::VHIterator_Tracked, h::HID)
     @unpack topo,h_start = iter
     iter.degree+one(UInt8) >= VH_MAX_DEGREE && return nothing
     h_start == h && return nothing
     iter.degree += one(UInt8)
-    return (h, @fix1topo next(twin(h)))
+    return (h, @fix1 topo next(twin(h)))
 end
 
 @fix1able function vertexdegree(topo::IHTopology,vid::VID)
@@ -363,7 +360,7 @@ FCIterator(topo::IHTopology{N}, f::FID) where N = imap(CID,FHIterator{N}(topo,f)
 
 @fix1able isboundary
 isboundary(topo::IHTopology, h::HID) = isnothing(face(topo,h))
-isboundary(topo::IHTopology, e::EID) = @fix1topo isboundary(_halfedge(e)) | isboundary(twin(_halfedge(e)))
+isboundary(topo::IHTopology, e::EID) = @fix1 topo isboundary(_halfedge(e)) | isboundary(twin(_halfedge(e)))
 isboundary(topo::IHTopology, f::FID) = any(isnothing,_FFIterator(topo,f))
 isboundary(topo::IHTopology, v::VID) = any(isnothing,_VFIterator(topo,v))
 
@@ -380,7 +377,7 @@ element(topo::IHTopology{0}, f::Integer) = connect(Tuple(FVIterator(topo,FID(f))
 element(topo::IHTopology{N}, f::Integer) where N = Connectivity{Ngon{N},N}(Tuple(FVIterator(topo,FID(f))))
 function facet(::IHTopology, e::Integer)
     h = _halfedge(EID(e))
-    connect(@fix1topo (vertex(h), headvertex(h)))
+    connect(@fix1 topo (vertex(h), headvertex(h)))
 end
 
 
@@ -648,7 +645,7 @@ function graphviz(topo::IHTopology;title="",engine="sfdp")
     println(buffer,'\n')
     for e in edgeids(topo)
         h = _halfedge(e)
-        v,hv = @fix1topo (vertex(h), headvertex(h))
+        v,hv = @fix1 topo (vertex(h), headvertex(h))
         println(buffer,"    $v -> $hv [headlabel=$h,taillabel=$(_twin(h)),dir=both]")
     end
     """

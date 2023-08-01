@@ -93,10 +93,10 @@ end
 # function ispinch(topo::IHTopology{3}, h0::HID)
 #     for h1 in VHIterator(topo,headvertex(topo,h0)), h2 in VHIterator(topo,headvertex(topo,h1))
 #         # going around a face interior
-#         @fix1topo next(h0)==h1 && next(h1) == h2 && continue
+#         @fix1 topo next(h0)==h1 && next(h1) == h2 && continue
 #         # going around a face exterior (twins of interior next loop)
-#         @fix1topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
-#         @fix1topo headvertex(h2) == vertex(h0) && return true
+#         @fix1 topo twin(next(twin(h1)))==h0 && twin(next(twin(h2))) == h1 && continue
+#         @fix1 topo headvertex(h2) == vertex(h0) && return true
 #     end
 #     return false
 # end
@@ -109,9 +109,9 @@ end
 
 function are_bothface_overlapping(topo::IHTopology{3}, e::EID)
     h11,h21 = _bothhalfedge(e)
-    h12,h22 = @fix1topo next(h11),next(h21)
-    v13,v23 = @fix1topo headvertex(h12),headvertex(h22)
-    return @fix1topo vertex(h11)==vertex(h22) && vertex(h12)==vertex(h21) && v13==v23
+    h12,h22 = @fix1 topo next(h11),next(h21)
+    v13,v23 = @fix1 topo headvertex(h12),headvertex(h22)
+    return @fix1 topo vertex(h11)==vertex(h22) && vertex(h12)==vertex(h21) && v13==v23
 end
 
 @propagate_inbounds function reassign_vid_to!(topo::IHTopology, vid::VID, vid_::VID)
@@ -144,7 +144,7 @@ end
 function collapseedge!(topo::IHTopology{3}, e::EID, hids_delete, vids_delete, fids_delete; record::Maybe{IHHandleRecord}=nothing)
     @assert !isboundary(topo, e)
     h1,h2 = _bothhalfedge(e)
-    # @assert @fix1topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
+    # @assert @fix1 topo !ispinch(isboundary(vertex(h1)) ? h2 : h1)
     
     @assign_vars_diamond topo e
     h11_,h12_,h21_,h22_ = _twin(h11), _twin(h12), _twin(h21), _twin(h22)
@@ -222,7 +222,7 @@ end
 
 # _degree_deviation(dv1::Int,dv2::Int,du1::Int,du2::Int) = abs(dv1-6)+abs(dv2-6)+abs(du1-6)+abs(du2-6)
 # function degree_deviation(mesh::IHMesh,v1::VID,v2::VID,u1::VID,u2::VID)
-#     dv1,dv2,du1,du2 = @fix1mesh vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
+#     dv1,dv2,du1,du2 = @fix1 mesh vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
 #     _degree_deviation(dv1,dv2,du1,du2)
 # end
 
@@ -242,7 +242,7 @@ end
 
 function delaunayvalue(mesh::IHTriMesh,e::EID)
     h1,h2 = _bothhalfedge(e)
-    return @fix1mesh ∠(opp_corner(h1))+∠(opp_corner(h2))
+    return @fix1 mesh ∠(opp_corner(h1))+∠(opp_corner(h2))
 end
 
 function is_diamond_delaunay(mesh::IHTriMesh{Dim,T},e::EID) where {Dim,T}
