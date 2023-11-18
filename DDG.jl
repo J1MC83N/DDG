@@ -82,7 +82,7 @@ mesh = IHMesh("test-obj/gourd.obj")
 center_vertices!(mesh)
 mesh_original = deepcopy(mesh)
 
-rec_flip = improve_delaunay2!(mesh)
+rec_flip = improve_delaunay!(mesh)
 mesh_flip = deepcopy(mesh)
 
 rec_split = split_long_edges!(mesh)
@@ -100,17 +100,17 @@ gridposes = [(row,col) for row in 1:2, col in 1:3]|>vec
 
 fig = Figure(); resize!(fig,winsize(1,1)...)
 lscene_original = vizgrid!(fig, popfirst!(gridposes), mesh_original, "original")
-# lscene_flip = vizgrid!(fig, popfirst!(gridposes), mesh_flip, "post-flip", 
-#     (values(rec_flip.hidmap),:red))
-# lscene_presplit = vizgrid!(fig, popfirst!(gridposes), mesh_flip, "pre-split", 
-#     (Iterators.filter(!iszero,keys(rec_split.hidmap)),:red))
-# lscene_postsplit = vizgrid!(fig, popfirst!(gridposes), mesh_split, "post-split", 
-#     (values(rec_split.hidmap),:red),
-#     (relationswith(rec_split.hidmap,HID(0)),:yellow))
+lscene_flip = vizgrid!(fig, popfirst!(gridposes), mesh_flip, "post-flip", 
+    (values(rec_flip.hidmap),:red))
+lscene_presplit = vizgrid!(fig, popfirst!(gridposes), mesh_flip, "pre-split", 
+    (Iterators.filter(!iszero,keys(rec_split.hidmap)),:red))
+lscene_postsplit = vizgrid!(fig, popfirst!(gridposes), mesh_split, "post-split", 
+    (values(rec_split.hidmap),:red),
+    (relationswith(rec_split.hidmap,HID(0)),:yellow))
 lscene_precollapse = vizgrid!(fig, popfirst!(gridposes), mesh_precollapse, "pre-collapse", 
     (relationswith(rec_collapse.hidmap.backward,INVALID_HID),:red))
-lscene_collapse = vizgrid!(fig, popfirst!(gridposes), mesh_collapse, "post-collapse", 
-    (Iterators.filter(!iszero,values(rec_collapse.hidmap)),:red))
+# lscene_collapse = vizgrid!(fig, popfirst!(gridposes), mesh_collapse, "post-collapse", 
+#     (Iterators.filter(!iszero,values(rec_collapse.hidmap)),:red))
 lscene_collapse_center = vizgrid!(fig, popfirst!(gridposes), mesh_collapse_center, "post-collapse-center", 
     (Iterators.filter(!iszero,values(rec_collapse.hidmap)),:red))
 synclscenes(map(gc->gc.content.content[2].content,fig.layout.content)...)
@@ -133,24 +133,24 @@ fig
 # display(GLMakie.Screen(),viz(mesh,showfacets=true;color))
 
 
-mesh = IHMesh("test-obj/coin.obj")
-mesh_original = deepcopy(mesh)
+# mesh = IHMesh("test-obj/coin.obj")
+# mesh_original = deepcopy(mesh)
 # GLMakie.activate!(title="original")
 # resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,2)...)
 
-center_vertices!(mesh)
+# center_vertices!(mesh)
 
-edges_tosplit,edges_split = split_long_edges!(mesh; shuffle_order=false)
-facetcolor = color_edges(mesh,:black,edges_split,:red)
-center_vertices!(mesh)
-mesh_split = deepcopy(mesh)
+# edges_tosplit,edges_split = split_long_edges!(mesh; shuffle_order=false)
+# facetcolor = color_edges(mesh,:black,edges_split,:red)
+# center_vertices!(mesh)
+# mesh_split = deepcopy(mesh)
 # GLMakie.activate!(title="Post-split")
 # resize!(display(GLMakie.Screen(),viz(mesh_split,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
 # display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor))
 
-edges_tocollapse,edges_seam = collapse_short_edges!(mesh)
-center_vertices!(mesh)
-mesh_collapse = deepcopy(mesh)
+# edges_tocollapse,edges_seam = collapse_short_edges!(mesh)
+# center_vertices!(mesh)
+# mesh_collapse = deepcopy(mesh)
 
 # submesh = subset(mesh_collapse, flood_traversal(mesh_collapse, FID, _FFIterator, bothface(mesh_collapse,EID(710)), 10))
 # display(GLMakie.Screen(), vizsub(submesh,0.05,showfacets=true))
@@ -171,9 +171,9 @@ mesh_collapse = deepcopy(mesh)
 # resize!(display(GLMakie.Screen(),viz(mesh_collapse,showfacets=true,color=:lightblue;facetcolor)), winsize(2,2)...)
 
 
-improve_delaunay2!(mesh)
-center_vertices!(mesh)
-mesh_delaunay = deepcopy(mesh)
+# improve_delaunay!(mesh)
+# center_vertices!(mesh)
+# mesh_delaunay = deepcopy(mesh)
 # GLMakie.activate!(title="Delaunay")
 # resize!(display(GLMakie.Screen(),viz(mesh_delaunay,showfacets=true,color=:lightblue,facetcolor=:black)), winsize(2,2)...)
 
@@ -183,14 +183,14 @@ mesh_delaunay = deepcopy(mesh)
 # resize!(display(GLMakie.Screen(),viz(mesh_centered,showfacets=true,color=:lightblue,facetcolor=:black)), winsize(2,2)...)
 
 
-mesh = IHMesh("test-obj/coin.obj")
-mesh_original = deepcopy(mesh)
-GLMakie.activate!(title="original")
-resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
+# mesh = IHMesh("test-obj/coin.obj")
+# mesh_original = deepcopy(mesh)
+# GLMakie.activate!(title="original")
+# resize!(display(GLMakie.Screen(),viz(mesh_original,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
 
-routine!(mesh)
-GLMakie.activate!(title="routine")
-resize!(display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
+# routine!(mesh)
+# GLMakie.activate!(title="routine")
+# resize!(display(GLMakie.Screen(),viz(mesh,showfacets=true,color=:lightblue;facetcolor=:black)), winsize(2,1)...)
 
 
 

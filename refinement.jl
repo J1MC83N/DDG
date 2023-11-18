@@ -5,7 +5,7 @@ macro assign_vars_diamond(topo,eid)
         h1::HID,h2::HID = _bothhalfedge($eid)
         h11::HID,h21::HID = @fix1 $topo (next(h1), next(h2))
         h12::HID,h22::HID = @fix1 $topo (next(h11), next(h21))
-        f1::FID,f2::FID = @fix1 $topo (face(h1), face(h2))
+        f1::Maybe{FID},f2::Maybe{FID} = @fix1 $topo (face(h1), face(h2))
         v1::VID,v2::VID = @fix1 $topo (vertex(h1), vertex(h2))
         u1::VID,u2::VID = @fix1 $topo (vertex(h12), vertex(h22))
     end |> esc
@@ -24,6 +24,7 @@ end
     v2h[v2] = h2
     v2h[v3] = h3
     f2h[f] = h1
+    nothing
 end
 
 function flipedge!(topo::IHTopology{3}, e::EID; record::Maybe{IHHandleRecord}=nothing)
@@ -220,24 +221,63 @@ end
 #     return mesh
 # end
 
-# _degree_deviation(dv1::Int,dv2::Int,du1::Int,du2::Int) = abs(dv1-6)+abs(dv2-6)+abs(du1-6)+abs(du2-6)
-# function degree_deviation(mesh::IHMesh,v1::VID,v2::VID,u1::VID,u2::VID)
-#     dv1,dv2,du1,du2 = @fix1 mesh vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
-#     _degree_deviation(dv1,dv2,du1,du2)
-# end
+_dd(deg::Int) = abs(deg-6)+(deg<=4)*2^(4-deg)
+_degree_deviation(dv1::Int,dv2::Int,du1::Int,du2::Int) = _dd(dv1)+_dd(dv2)+_dd(du1)+_dd(du2)
+function _degree_deviation(mesh::IHMesh,v1::VID,v2::VID,u1::VID,u2::VID)
+    dv1,dv2,du1,du2 = @fix1 mesh vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
+    _degree_deviation(dv1,dv2,du1,du2)
+end
 
 # improve_vertex_degree!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Maybe{AbstractSet{EID}}=nothing) = improve_by_flips!(flip_if_improves_vertex_degree!,mesh,p;max_checks,blacklist)
-# # _should_flip(dv1::Int,dv2::Int,du1::Int,du2::Int) = _degree_deviation(dv1-1,dv2-1,du1+1,du2+1) > _degree_deviation(dv1,dv2,du1,du2)
+_degree_improvement_if_flip(dv1::Int,dv2::Int,du1::Int,du2::Int) = _degree_deviation(dv1-1,dv2-1,du1+1,du2+1) - _degree_deviation(dv1,dv2,du1,du2)
+function _degree_improvement_if_flip(mesh::IHTriMesh,e::EID)
+    @assign_vars_diamond mesh e
+    dv1,dv2,du1,du2 = @fix1 topo vertexdegree(v1),vertexdegree(v2),vertexdegree(u1),vertexdegree(u2)
+    _degree_improvement_if_flip(dv1,dv2,du1,du2)
+end
 
-# function flip_if_improves_vertex_degree!(mesh::IHTriMesh,e::EID)::Bool
-#     @assign_vars_diamond mesh e
-#     deviation = degree_deviation(mesh,v1,v2,u1,u2)
-#     flipedge!(mesh, e) # try flipping edge
-#     # assumes vertex ids remain unchanged
-#     improves = degree_deviation(mesh,v1,v2,u1,u2) < deviation
-#     !improves && flipedge!(mesh, e) # flip edge back
-#     return improves
-# end
+function flip_if_improves_degree!(mesh::IHTriMesh, e::EID; record::Maybe{IHHandleRecord}=nothing)::Bool
+    @assign_vars_diamond mesh e
+    deviation = _degree_deviation(mesh,v1,v2,u1,u2)
+    flipedge!(mesh, e; record) # try flipping edge
+    # assumes vertex ids remain unchanged
+    improves = _degree_deviation(mesh,v1,v2,u1,u2) < deviation
+    !improves && flipedge!(mesh, e; record) # flip edge back
+    return improves
+end
+
+
+function improve_vertex_degree!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
+    record = IHHandleRecord(mesh)
+    
+    E2Priority = PriorityQueue{EID,Int}(Base.ReverseOrdering())
+    for e in edgeids(mesh)
+        !isboundary(mesh, e) && (E2Priority[e] = _degree_improvement_if_flip(mesh, e))
+    end
+    nflips = 0
+    while !isempty(E2Priority)
+        e,deg_impr = dequeue_pair!(E2Priority)
+        deg_impr <= 0 && break # maximum edge value is below threshold
+        flip_produces_crease(mesh, e) && continue
+        flipedge!(mesh, e; record); nflips += 1
+        
+        # update priority affected edges
+        @assign_vars_diamond mesh e
+        for h in (h11,h12,h21,h22)
+            eh = _edge(h)
+            !haskey(E2Priority, eh) && continue
+            hpriority = delaunayvalue(mesh, eh)
+            E2Priority[eh] = hpriority
+        end
+    end
+    @show nflips, nedges(mesh)
+    return record
+end
+
+
+
+
+
 
 
 function delaunayvalue(mesh::IHTriMesh,e::EID)
@@ -258,7 +298,7 @@ is_diamond_delaunay(mesh::IHTriMesh,h::HID) = is_diamond_delaunay(mesh,_edge(h))
 
 # improve_delaunay!(mesh::IHTriMesh, p::Real; max_checks::Int=nedges(mesh), blacklist::Maybe{AbstractSet{EID}}=nothing) = improve_by_flips!(flip_if_improves_delaunay!,mesh,p;max_checks,blacklist)
 
-function improve_delaunay2!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
+function improve_delaunay!(mesh::IHTriMesh{Dim,T}) where {Dim,T}
     record = IHHandleRecord(mesh)
     
     E2Priority = PriorityQueue{EID,T}(Base.ReverseOrdering())
@@ -471,7 +511,7 @@ function routine!(mesh::IHTriMesh{3})
     center_vertices!(mesh)
     collapse_short_edges!(mesh)
     center_vertices!(mesh)
-    improve_delaunay2!(mesh)
+    improve_delaunay!(mesh)
     center_vertices!(mesh)
     return mesh
 end
